@@ -49,18 +49,28 @@ async function reloadPacks() {
 const resolveRef = ref => (ref && refIndex.get(ref)) || null;
 const refsOfType = type => enabledPacks.flatMap(p => p.entries.filter(e => e.type === type).map(e => p.id + ':' + e.id));
 
-// 缺省值：底板/背景/音乐没选或指向已卸载的包时，退到第一个可用的
+// 缺省值：只在"从没选过"时填第一个可用的。选了但暂时找不到（包被禁用/卸载）的不动，
+// 显示时用 effective() 临时兜底，包装回来选择自动恢复。
 function fillDefaults() {
   const p = project(state);
-  if (!resolveRef(p.board)) p.board = refsOfType('board')[0] || null;
-  if (!resolveRef(p.background)) p.background = refsOfType('background')[0] || null;
-  if (!resolveRef(state.settings.bgmRef)) state.settings.bgmRef = refsOfType('bgm')[0] || null;
+  if (p.board == null) p.board = refsOfType('board')[0] || null;
+  if (p.background == null) p.background = refsOfType('background')[0] || null;
+  if (state.settings.bgmRef == null) state.settings.bgmRef = refsOfType('bgm')[0] || null;
+}
+const effective = (type, ref) => (resolveRef(ref) ? ref : refsOfType(type)[0] || null);
+function view() {
+  const p = project(state);
+  return {
+    board: effective('board', p.board),
+    background: effective('background', p.background),
+    bgm: effective('bgm', state.settings.bgmRef),
+  };
 }
 
 // 把画面要用到的 blob 都换成对象地址（第一次从 IndexedDB 读，之后命中缓存）
 async function ensureUrls() {
-  const p = project(state);
-  const refs = [p.board, p.background, state.settings.bgmRef, ...p.items.map(i => i.ref), ...refsOfType('sticker')];
+  const p = project(state), v = view();
+  const refs = [v.board, v.background, v.bgm, ...p.items.map(i => i.ref), ...refsOfType('sticker')];
   await Promise.all(refs.map(r => { const h = resolveRef(r); return h ? Packs.urlFor(h.entry.sha256) : null; }));
 }
 
@@ -68,7 +78,7 @@ async function ensureUrls() {
 const renderer = createRenderer({ stage, layer, boardEl, sheet, countEl, resolveRef, bindItem });
 async function render() {
   await ensureUrls();
-  renderer.render(state, enabledPacks);
+  renderer.render(state, enabledPacks, view());
   syncBgm();
 }
 
@@ -182,7 +192,7 @@ addEventListener('pointercancel', () => {
 
 // ---------- 音乐 ----------
 function syncBgm() {
-  const hit = resolveRef(state.settings.bgmRef);
+  const hit = resolveRef(view().bgm);
   const u = hit ? Packs.urlSync(hit.entry.sha256) : '';
   if (u && audio.dataset.hash !== hit.entry.sha256) { audio.src = u; audio.dataset.hash = hit.entry.sha256; audio.volume = 0.5; }
   const btn = $('#btn-bgm');
@@ -206,13 +216,13 @@ function cycle(type, current) {
 }
 $('#btn-bgm').onclick = () => { commit({ type: 'setBgm', on: !state.settings.bgm }); syncBgm(); };
 $('#btn-board').onclick = () => {
-  const ref = cycle('board', project(state).board);
+  const ref = cycle('board', view().board);
   if (!ref) return showToast('没有可用的底板');
   commit({ type: 'setBoard', ref }); render();
   showToast(`底板 ${refsOfType('board').indexOf(ref) + 1} / ${refsOfType('board').length}`);
 };
 $('#btn-bg').onclick = () => {
-  const ref = cycle('background', project(state).background);
+  const ref = cycle('background', view().background);
   if (!ref) return showToast('没有可用的桌面');
   commit({ type: 'setBackground', ref }); render();
 };

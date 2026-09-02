@@ -87,11 +87,12 @@ export function createRenderer({ stage, layer, boardEl, sheet, countEl, resolveR
     countEl.textContent = `剩 ${total - used.size} / ${total}`;
   }
 
-  function render(state, packs) {
+  // view：应用层算好的“实际显示”底板/背景引用（选中的找不到时临时兜底）
+  function render(state, packs, view) {
     const p = project(state);
-    const bg = resolveRef(p.background);
+    const bg = resolveRef(view.background);
     stage.style.backgroundImage = bg ? `url(${urlSync(bg.entry.sha256)})` : 'none';
-    const board = resolveRef(p.board);
+    const board = resolveRef(view.board);
     boardEl.hidden = !board;
     if (board) boardEl.src = urlSync(board.entry.sha256) || '';
     renderItems(p);
