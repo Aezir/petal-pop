@@ -10,6 +10,7 @@
 *{box-sizing:border-box}
 html,body{margin:0;height:100%;background:#2b1d16;overflow:hidden;font-family:var(--font);color:var(--ink);user-select:none;-webkit-user-select:none}
 img{image-rendering:pixelated;image-rendering:crisp-edges}
+img.smooth{image-rendering:auto}
 [hidden]{display:none!important}
 
 /* 舞台：固定 1672×941 逻辑坐标，用 transform 整体缩放适配窗口 */
@@ -22,15 +23,20 @@ img{image-rendering:pixelated;image-rendering:crisp-edges}
   overflow:hidden;
 }
 
-/* 底板 */
+/* ===== 本子 ===== */
+/* wrap 是一个 0×0 的锚点，位置 = 本子中心；缩放和翻转都以它为原点 */
+#boardWrap{position:absolute;width:0;height:0;transform-origin:0 0;z-index:1}
 #board{
-  position:absolute;left:450px;top:585px;width:760px;
-  transform:translateY(-50%);
+  position:absolute;left:0;top:0;width:760px;
+  transform:translate(-50%,-50%);
   filter:drop-shadow(6px 8px 0 var(--shadow));
-  pointer-events:none;
+  cursor:grab;
 }
+#board:active{cursor:grabbing}
+#boardWrap.selected #board{filter:drop-shadow(6px 8px 0 var(--shadow)) drop-shadow(0 0 0 var(--pink)) drop-shadow(0 0 3px var(--pink-deep))}
+#boardLayer{position:absolute;left:0;top:0;width:0;height:0}
 
-/* 已贴贴纸层 */
+/* ===== 贴纸 ===== */
 #layer{position:absolute;inset:0;pointer-events:none}
 .placed{
   position:absolute;pointer-events:auto;cursor:grab;
@@ -38,24 +44,26 @@ img{image-rendering:pixelated;image-rendering:crisp-edges}
   touch-action:none;
 }
 .placed:active{cursor:grabbing}
+.placed.selected{outline:3px dashed var(--pink-deep);outline-offset:4px}
+.placed.grouped{filter:drop-shadow(3px 4px 0 rgba(60,30,20,.45)) drop-shadow(0 0 2px rgba(226,67,127,.35))}
+.placed.dragging{z-index:9999!important;filter:drop-shadow(14px 18px 0 rgba(60,30,20,.3));cursor:grabbing}
 .placed.missing{
   width:110px;height:110px;display:flex;align-items:center;justify-content:center;text-align:center;
   white-space:pre-line;font-size:12px;line-height:1.3;padding:6px;
   background:rgba(255,246,227,.85);border:3px dashed var(--ink);filter:none;
 }
-.placed.stick{animation:stick .22s steps(4) both}
+.placed.stick{animation:stick .25s steps(4) both}
 @keyframes stick{
-  0%{filter:drop-shadow(10px 14px 0 rgba(60,30,20,.25));margin-top:-14px}
+  0%{filter:drop-shadow(12px 16px 0 rgba(60,30,20,.25));margin-top:-12px}
   100%{filter:drop-shadow(3px 4px 0 rgba(60,30,20,.45));margin-top:0}
 }
-.placed.peel{animation:peel .25s steps(4) forwards}
+.placed.peel{animation:peel .22s steps(4) forwards}
 @keyframes peel{to{opacity:0;margin-top:-30px}}
-
-/* 拖拽中的“撕下来”幽灵贴纸 */
-.ghost{
-  position:absolute;pointer-events:none;z-index:9999;
-  transform:translate(-50%,-50%) rotate(-7deg) scale(1.08);
-  filter:drop-shadow(12px 16px 0 rgba(60,30,20,.3));
+.placed.peel-off{animation:peeloff .45s steps(5) both}
+@keyframes peeloff{
+  0%{margin-top:0}
+  40%{margin-top:-18px;filter:drop-shadow(16px 22px 0 rgba(60,30,20,.25))}
+  100%{margin-top:0}
 }
 
 /* ===== 像素盒子 / 按钮 ===== */
@@ -78,18 +86,35 @@ img{image-rendering:pixelated;image-rendering:crisp-edges}
 .px-btn:active{transform:translate(3px,3px);box-shadow:1px 1px 0 var(--shadow), inset 0 0 0 2px #fff}
 .px-btn.on{background:var(--pink);color:#fff}
 .px-btn:disabled{opacity:.5;cursor:default}
+.px-btn.danger:hover{background:#ffd6d6}
 
 #toolbar{position:absolute;left:24px;top:20px;display:flex;gap:12px;z-index:50}
+
+/* 选中后的小工具条 */
+#mini{
+  position:absolute;transform:translateX(-50%);z-index:70;
+  display:flex;gap:6px;padding:6px;
+}
+#mini[data-kind="board"] .only-item{display:none}
 
 /* ===== 贴纸册面板 ===== */
 #panel{
   position:absolute;right:28px;top:24px;width:400px;height:893px;
   display:flex;flex-direction:column;z-index:40;padding:10px;
+  transition:width .15s steps(3);
 }
 .panel-head{
-  display:flex;justify-content:space-between;align-items:baseline;
-  font-size:22px;padding:4px 6px 10px;border-bottom:4px dotted var(--ink);
+  display:flex;align-items:center;gap:8px;
+  font-size:22px;padding:2px 4px 10px;border-bottom:4px dotted var(--ink);
 }
+.panel-title{flex:1}
+.fold{
+  border:3px solid var(--ink);background:var(--paper);color:var(--ink);cursor:pointer;
+  width:30px;height:30px;display:flex;align-items:center;justify-content:center;padding:0;
+  box-shadow:2px 2px 0 var(--shadow);
+}
+.fold i{font-size:18px}
+.fold:hover{background:#ffe9f2}
 .dim{opacity:.6;font-size:13px}
 .panel-foot{padding:10px 4px 2px;line-height:1.5}
 #sheet{
@@ -98,6 +123,13 @@ img{image-rendering:pixelated;image-rendering:crisp-edges}
   align-content:start;
   scrollbar-width:thin;scrollbar-color:var(--ink) transparent;
 }
+/* 折叠：缩成右侧一条竖签 */
+#panel.collapsed{width:60px;cursor:pointer;padding:10px 6px}
+#panel.collapsed .panel-head{flex-direction:column;border-bottom:0;padding:0}
+#panel.collapsed .panel-title{writing-mode:vertical-rl;letter-spacing:6px;margin-top:12px}
+#panel.collapsed .fold i{transform:scaleX(-1)}
+#panel.collapsed #count,#panel.collapsed #sheet,#panel.collapsed .panel-foot{display:none}
+
 .pack-head{grid-column:1/-1;font-size:14px;opacity:.7;padding:6px 2px 0;border-top:3px dotted rgba(74,46,34,.3)}
 .pack-head:first-child{border-top:0;padding-top:0}
 .thumb{
@@ -107,7 +139,11 @@ img{image-rendering:pixelated;image-rendering:crisp-edges}
 .thumb img{max-width:92%;max-height:92%;pointer-events:none;
   filter:drop-shadow(2px 3px 0 rgba(60,30,20,.3))}
 .thumb:hover img{transform:translate(-2px,-3px) rotate(-3deg)}
-.thumb.lifting img{opacity:.25}
+.thumb.peeling img{animation:thumbpeel .4s steps(4) both}
+@keyframes thumbpeel{
+  0%{transform:translate(-2px,-3px) rotate(-3deg);opacity:1}
+  100%{transform:translate(-30px,-40px) rotate(-25deg);opacity:0}
+}
 /* 撕走后留下的空位 */
 .thumb.used{border-color:rgba(74,46,34,.35);cursor:default;pointer-events:none;background:rgba(74,46,34,.05)}
 .thumb.used img{opacity:.12;filter:none}
@@ -120,10 +156,20 @@ img{image-rendering:pixelated;image-rendering:crisp-edges}
 }
 #toast.show{opacity:1}
 
-/* ===== 素材包弹窗 ===== */
+/* ===== 设置弹窗 ===== */
 .modal{position:fixed;inset:0;background:rgba(30,15,10,.55);display:flex;align-items:center;justify-content:center;z-index:90}
 .modal-card{width:min(720px,92vw);max-height:88vh;display:flex;flex-direction:column;padding:16px 18px;gap:12px}
 .modal-head{display:flex;justify-content:space-between;align-items:center;font-size:24px;border-bottom:4px dotted var(--ink);padding-bottom:8px}
+.tabs{display:flex;gap:6px}
+.tab{
+  font-family:var(--font);font-size:15px;color:var(--ink);background:transparent;border:3px solid transparent;
+  padding:6px 12px;cursor:pointer;display:inline-flex;align-items:center;gap:5px;opacity:.6;
+}
+.tab i{font-size:17px}
+.tab:hover{opacity:1}
+.tab.on{opacity:1;border-color:var(--ink);background:#fff;box-shadow:3px 3px 0 var(--shadow)}
+.modal-card section{display:flex;flex-direction:column;gap:12px;overflow:auto;min-height:120px}
+.modal-card p{margin:0;line-height:1.6;font-size:15px}
 #pack-list{flex:1;overflow:auto;display:flex;flex-direction:column;gap:8px;min-height:60px}
 .pack-row{display:flex;align-items:center;gap:10px;padding:8px 10px;border:3px solid var(--ink);background:#fff}
 .pack-row.off{opacity:.55}
@@ -138,9 +184,12 @@ img{image-rendering:pixelated;image-rendering:crisp-edges}
   border:4px solid var(--ink);background:#fff;color:var(--ink);outline:none;
 }
 .add-row input:focus{background:#fff4f8}
-.modal-foot{display:flex;align-items:center;gap:8px}
-.spacer{flex:1}
+.row-end{display:flex;justify-content:flex-end}
+.btn-row{display:flex;gap:10px;flex-wrap:wrap}
 .modal-help{font-size:12px;line-height:1.5}
+.storage-info{line-height:1.7}
+.slider-row{display:flex;align-items:center;gap:12px;font-size:16px}
+.slider-row input{flex:1;accent-color:var(--pink-deep)}
 
 /* ===== 加载遮罩 ===== */
 #loading{position:fixed;inset:0;background:#2b1d16;display:flex;align-items:center;justify-content:center;z-index:100;transition:opacity .3s}

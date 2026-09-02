@@ -12,20 +12,24 @@
 <body>
 
 <div id="stage">
-  <!-- 底板（本子 / 以后的人偶板、房间） -->
-  <img id="board" alt="board" draggable="false" hidden>
+  <!-- 底板（本子）：wrap 承载位置 / 缩放 / 翻转，贴在本子上的贴纸放在 boardLayer 里跟着一起变 -->
+  <div id="boardWrap" hidden>
+    <img id="board" alt="board" draggable="false">
+    <div id="boardLayer"></div>
+  </div>
 
-  <!-- 已贴贴纸层：铺满整张桌子 -->
+  <!-- 贴在桌面上的贴纸层 -->
   <div id="layer"></div>
 
   <!-- 贴纸册 -->
   <div id="panel" class="px-box">
     <div class="panel-head">
-      <span>贴纸册</span>
+      <button id="btn-fold" class="fold" title="折叠 / 展开"><i class="ri-arrow-right-double-line"></i></button>
+      <span class="panel-title">贴纸册</span>
       <span id="count" class="dim"></span>
     </div>
     <div id="sheet"></div>
-    <div class="panel-foot dim">拖出来贴到本子上 · 滚轮转 · Shift+滚轮缩放 · 双击撕掉 · Ctrl+Z 撤销</div>
+    <div class="panel-foot dim">按住撕下来直接贴 · 拖回这里收回 · 重叠会吸在一起，长按撕开 · 滚轮转</div>
   </div>
 
   <!-- 工具条 -->
@@ -35,31 +39,67 @@
     <button id="btn-bg" class="px-btn" title="换桌面"><i class="ri-landscape-line"></i><span>换桌面</span></button>
     <button id="btn-undo" class="px-btn" title="撤销 (Ctrl+Z)"><i class="ri-arrow-go-back-line"></i><span>撤销</span></button>
     <button id="btn-clear" class="px-btn" title="全部撕掉"><i class="ri-eraser-line"></i><span>清空</span></button>
-    <button id="btn-packs" class="px-btn" title="素材包管理"><i class="ri-archive-2-line"></i><span>素材包</span></button>
+    <button id="btn-settings" class="px-btn" title="设置"><i class="ri-settings-3-line"></i><span>设置</span></button>
+  </div>
+
+  <!-- 选中贴纸 / 本子后出现的小工具条 -->
+  <div id="mini" class="px-box" hidden>
+    <button id="mini-flip" class="px-btn sm" title="左右翻转 (F)"><i class="ri-flip-horizontal-line"></i></button>
+    <button id="mini-in" class="px-btn sm" title="放大 (+)"><i class="ri-zoom-in-line"></i></button>
+    <button id="mini-out" class="px-btn sm" title="缩小 (-)"><i class="ri-zoom-out-line"></i></button>
+    <button id="mini-back" class="px-btn sm only-item" title="撕回贴纸册 (Delete)"><i class="ri-scissors-line"></i></button>
   </div>
 
   <div id="toast" class="px-box"></div>
 </div>
 
-<!-- 素材包管理 -->
+<!-- 设置 -->
 <div id="modal" class="modal" hidden>
   <div class="px-box modal-card">
     <div class="modal-head">
-      <span>素材包</span>
+      <span>设置</span>
       <button id="btn-close" class="px-btn sm" title="关闭"><i class="ri-close-line"></i></button>
     </div>
-    <div id="pack-list"></div>
-    <div class="add-row">
-      <input id="pack-input" placeholder="用户名/仓库名@标签  或  local:packs/xxx" spellcheck="false">
-      <button id="btn-add" class="px-btn"><i class="ri-add-line"></i>安装</button>
+    <div class="tabs">
+      <button class="tab on" data-tab="packs"><i class="ri-archive-2-line"></i>素材包</button>
+      <button class="tab" data-tab="save"><i class="ri-save-3-line"></i>存档</button>
+      <button class="tab" data-tab="storage"><i class="ri-hard-drive-2-line"></i>存储</button>
+      <button class="tab" data-tab="audio"><i class="ri-music-2-line"></i>音乐</button>
     </div>
-    <div class="modal-foot">
-      <span id="storage" class="dim"></span>
-      <span class="spacer"></span>
-      <button id="btn-default" class="px-btn sm" title="重装 / 更新默认包"><i class="ri-home-4-line"></i>默认包</button>
-      <button id="btn-gc" class="px-btn sm" title="删掉没有任何包引用的文件"><i class="ri-brush-2-line"></i>清理</button>
-    </div>
-    <div class="dim modal-help">包格式说明见 docs/08-pack-format.md。只装你信得过的仓库；包里只会加载图片和音频，永远不会执行脚本。</div>
+
+    <section data-pane="packs">
+      <div id="pack-list"></div>
+      <div class="add-row">
+        <input id="pack-input" placeholder="用户名/仓库名@标签  或  local:packs/xxx" spellcheck="false">
+        <button id="btn-add" class="px-btn"><i class="ri-add-line"></i>安装</button>
+      </div>
+      <div class="row-end">
+        <button id="btn-default" class="px-btn sm" title="重装 / 更新默认包"><i class="ri-home-4-line"></i>默认包</button>
+      </div>
+      <div class="dim modal-help">包格式说明见 docs/08-pack-format.md。只装你信得过的仓库；包里只会加载图片和音频，永远不会执行脚本。</div>
+    </section>
+
+    <section data-pane="save" hidden>
+      <p>存档里只有贴纸的位置和引用，不含图片。换电脑时导出这份文件，装上同样的素材包再导入即可复原。</p>
+      <div class="btn-row">
+        <button id="btn-export" class="px-btn"><i class="ri-download-2-line"></i>导出存档</button>
+        <button id="btn-import" class="px-btn"><i class="ri-upload-2-line"></i>导入存档</button>
+        <input id="import-file" type="file" accept="application/json,.json" hidden>
+      </div>
+    </section>
+
+    <section data-pane="storage" hidden>
+      <p id="storage-info" class="storage-info">…</p>
+      <div class="btn-row">
+        <button id="btn-gc" class="px-btn sm" title="删掉没有任何包引用的文件"><i class="ri-brush-2-line"></i>清理无引用文件</button>
+        <button id="btn-wipe" class="px-btn sm danger" title="删除本站点所有本地数据"><i class="ri-delete-bin-2-line"></i>清空全部本地数据</button>
+      </div>
+      <div class="dim modal-help">素材按内容去重存在浏览器的 IndexedDB 里。卸载素材包后点“清理”可释放空间。</div>
+    </section>
+
+    <section data-pane="audio" hidden>
+      <label class="slider-row">音量 <input id="volume" type="range" min="0" max="100"></label>
+    </section>
   </div>
 </div>
 

@@ -2,15 +2,20 @@
 import { urlSync, displayName } from './packs.js';
 import { project } from './state.js';
 
-export function createRenderer({ stage, layer, boardEl, sheet, countEl, resolveRef, bindItem }) {
+export const BOARD_WIDTH = 760;   // 本子在舞台上的基准宽度（缩放 1 时）
+
+export function createRenderer({ stage, layer, boardWrap, boardEl, boardLayer, sheet, countEl, resolveRef, bindItem }) {
   const nodes = new Map();   // uid → 元素
   let sheetKey = '';
 
-  function placeStyle(el, it) {
+  function placeStyle(el, it, boardT) {
     el.style.left = it.x + 'px';
     el.style.top = it.y + 'px';
-    el.style.transform = `translate(-50%,-50%) rotate(${it.rot}deg) scale(${it.s})`;
+    el.style.transform = `translate(-50%,-50%) rotate(${it.rot}deg) scale(${it.s}) scaleX(${it.flip ? -1 : 1})`;
     el.style.zIndex = it.z;
+    // 缩小时用平滑采样，放大时用最近邻（像素风）
+    const eff = it.s * (it.on === 'board' ? boardT.s : 1);
+    el.classList.toggle('smooth', eff < 0.98);
   }
 
   function makeNode(it) {
@@ -33,19 +38,39 @@ export function createRenderer({ stage, layer, boardEl, sheet, countEl, resolveR
     return el;
   }
 
-  function renderItems(p) {
+  function renderItems(p, sel) {
     const seen = new Set();
     for (const it of p.items) {
       let el = nodes.get(it.uid);
       const hit = resolveRef(it.ref);
       const wantMissing = !hit;
       if (el && el.classList.contains('missing') !== wantMissing) { el.remove(); el = null; }
-      if (!el) { el = makeNode(it); nodes.set(it.uid, el); layer.appendChild(el); }
+      if (!el) { el = makeNode(it); nodes.set(it.uid, el); }
+      const parent = it.on === 'board' ? boardLayer : layer;
+      if (el.parentNode !== parent) parent.appendChild(el);
       if (hit && el.tagName === 'IMG' && !el.src) el.src = urlSync(hit.entry.sha256) || '';
-      placeStyle(el, it);
+      placeStyle(el, it, p.boardT);
+      el.classList.toggle('selected', sel?.kind === 'item' && sel.uid === it.uid);
+      el.classList.toggle('grouped', it.group != null);
       seen.add(it.uid);
     }
     for (const [uid, el] of nodes) if (!seen.has(uid)) { el.remove(); nodes.delete(uid); }
+  }
+
+  function renderBoard(p, view, sel) {
+    const board = resolveRef(view.board);
+    boardWrap.hidden = !board;
+    if (!board) return;
+    if (boardEl.dataset.hash !== board.entry.sha256) {
+      boardEl.src = urlSync(board.entry.sha256) || '';
+      boardEl.dataset.hash = board.entry.sha256;
+    }
+    const t = p.boardT;
+    boardWrap.style.left = t.x + 'px';
+    boardWrap.style.top = t.y + 'px';
+    boardWrap.style.transform = `scale(${t.s}) scaleX(${t.flip ? -1 : 1})`;
+    boardEl.classList.toggle('smooth', t.s < 0.98);
+    boardWrap.classList.toggle('selected', sel?.kind === 'board');
   }
 
   // 贴纸册：包变了才重建；用没用过每次都从状态同步
@@ -56,7 +81,7 @@ export function createRenderer({ stage, layer, boardEl, sheet, countEl, resolveR
     const top = sheet.scrollTop;
     sheet.innerHTML = '';
     for (const p of packs) {
-      const stickers = p.entries.filter(e => e.type === 'sticker');
+      const stickers = p.entries.filter(e => e.type === 'sticker' && !e.deprecated);
       if (!stickers.length) continue;
       const head = document.createElement('div');
       head.className = 'pack-head';
@@ -84,18 +109,16 @@ export function createRenderer({ stage, layer, boardEl, sheet, countEl, resolveR
       total++;
       t.classList.toggle('used', used.has(t.dataset.ref));
     }
-    countEl.textContent = `剩 ${total - used.size} / ${total}`;
+    countEl.textContent = `${total - used.size} / ${total}`;
   }
 
-  // view：应用层算好的“实际显示”底板/背景引用（选中的找不到时临时兜底）
-  function render(state, packs, view) {
+  // view：应用层算好的“实际显示”底板/背景引用；sel：当前选中（贴纸或本子）
+  function render(state, packs, view, sel) {
     const p = project(state);
     const bg = resolveRef(view.background);
     stage.style.backgroundImage = bg ? `url(${urlSync(bg.entry.sha256)})` : 'none';
-    const board = resolveRef(view.board);
-    boardEl.hidden = !board;
-    if (board) boardEl.src = urlSync(board.entry.sha256) || '';
-    renderItems(p);
+    renderBoard(p, view, sel);
+    renderItems(p, sel);
     buildSheet(packs);
     syncSheet(p);
   }
