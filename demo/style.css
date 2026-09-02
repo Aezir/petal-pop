@@ -1,0 +1,152 @@
+/* ===== 像素风基础 ===== */
+:root{
+  --ink:#4a2e22;        /* 深棕描边 */
+  --paper:#fff6e3;      /* 纸色 */
+  --pink:#ff7fb0;
+  --pink-deep:#e2437f;
+  --shadow:rgba(60,30,20,.35);
+  --font:"DotGothic16","Zpix","Microsoft YaHei",sans-serif;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:#2b1d16;overflow:hidden;font-family:var(--font);color:var(--ink);user-select:none;-webkit-user-select:none}
+img{image-rendering:pixelated;image-rendering:crisp-edges}
+[hidden]{display:none!important}
+
+/* 舞台：固定 1672×941 逻辑坐标，用 transform 整体缩放适配窗口 */
+#stage{
+  position:absolute;left:50%;top:50%;
+  width:1672px;height:941px;
+  transform:translate(-50%,-50%);
+  transform-origin:center center;
+  background:#c98a4a center/cover no-repeat;
+  overflow:hidden;
+}
+
+/* 底板 */
+#board{
+  position:absolute;left:450px;top:585px;width:760px;
+  transform:translateY(-50%);
+  filter:drop-shadow(6px 8px 0 var(--shadow));
+  pointer-events:none;
+}
+
+/* 已贴贴纸层 */
+#layer{position:absolute;inset:0;pointer-events:none}
+.placed{
+  position:absolute;pointer-events:auto;cursor:grab;
+  filter:drop-shadow(3px 4px 0 rgba(60,30,20,.45));
+  touch-action:none;
+}
+.placed:active{cursor:grabbing}
+.placed.missing{
+  width:110px;height:110px;display:flex;align-items:center;justify-content:center;text-align:center;
+  white-space:pre-line;font-size:12px;line-height:1.3;padding:6px;
+  background:rgba(255,246,227,.85);border:3px dashed var(--ink);filter:none;
+}
+.placed.stick{animation:stick .22s steps(4) both}
+@keyframes stick{
+  0%{filter:drop-shadow(10px 14px 0 rgba(60,30,20,.25));margin-top:-14px}
+  100%{filter:drop-shadow(3px 4px 0 rgba(60,30,20,.45));margin-top:0}
+}
+.placed.peel{animation:peel .25s steps(4) forwards}
+@keyframes peel{to{opacity:0;margin-top:-30px}}
+
+/* 拖拽中的“撕下来”幽灵贴纸 */
+.ghost{
+  position:absolute;pointer-events:none;z-index:9999;
+  transform:translate(-50%,-50%) rotate(-7deg) scale(1.08);
+  filter:drop-shadow(12px 16px 0 rgba(60,30,20,.3));
+}
+
+/* ===== 像素盒子 / 按钮 ===== */
+.px-box{
+  background:var(--paper);
+  border:4px solid var(--ink);
+  box-shadow:6px 6px 0 var(--shadow), inset 0 0 0 3px #fff;
+}
+.px-btn{
+  font-family:var(--font);font-size:16px;color:var(--ink);
+  background:var(--paper);border:4px solid var(--ink);
+  box-shadow:4px 4px 0 var(--shadow), inset 0 0 0 2px #fff;
+  padding:8px 12px;cursor:pointer;display:inline-flex;align-items:center;gap:6px;
+  line-height:1;white-space:nowrap;
+}
+.px-btn i{font-size:20px}
+.px-btn.sm{font-size:14px;padding:5px 9px;border-width:3px}
+.px-btn.sm i{font-size:16px}
+.px-btn:hover{background:#ffe9f2}
+.px-btn:active{transform:translate(3px,3px);box-shadow:1px 1px 0 var(--shadow), inset 0 0 0 2px #fff}
+.px-btn.on{background:var(--pink);color:#fff}
+.px-btn:disabled{opacity:.5;cursor:default}
+
+#toolbar{position:absolute;left:24px;top:20px;display:flex;gap:12px;z-index:50}
+
+/* ===== 贴纸册面板 ===== */
+#panel{
+  position:absolute;right:28px;top:24px;width:400px;height:893px;
+  display:flex;flex-direction:column;z-index:40;padding:10px;
+}
+.panel-head{
+  display:flex;justify-content:space-between;align-items:baseline;
+  font-size:22px;padding:4px 6px 10px;border-bottom:4px dotted var(--ink);
+}
+.dim{opacity:.6;font-size:13px}
+.panel-foot{padding:10px 4px 2px;line-height:1.5}
+#sheet{
+  flex:1;overflow-y:auto;overflow-x:hidden;
+  display:grid;grid-template-columns:repeat(3,1fr);gap:8px;padding:10px 4px;
+  align-content:start;
+  scrollbar-width:thin;scrollbar-color:var(--ink) transparent;
+}
+.pack-head{grid-column:1/-1;font-size:14px;opacity:.7;padding:6px 2px 0;border-top:3px dotted rgba(74,46,34,.3)}
+.pack-head:first-child{border-top:0;padding-top:0}
+.thumb{
+  aspect-ratio:1/1;display:flex;align-items:center;justify-content:center;
+  border:3px dashed transparent;cursor:grab;position:relative;touch-action:none;
+}
+.thumb img{max-width:92%;max-height:92%;pointer-events:none;
+  filter:drop-shadow(2px 3px 0 rgba(60,30,20,.3))}
+.thumb:hover img{transform:translate(-2px,-3px) rotate(-3deg)}
+.thumb.lifting img{opacity:.25}
+/* 撕走后留下的空位 */
+.thumb.used{border-color:rgba(74,46,34,.35);cursor:default;pointer-events:none;background:rgba(74,46,34,.05)}
+.thumb.used img{opacity:.12;filter:none}
+
+/* ===== 提示 ===== */
+#toast{
+  position:absolute;left:50%;bottom:30px;transform:translateX(-50%);
+  padding:10px 18px;font-size:18px;z-index:60;opacity:0;transition:opacity .2s;pointer-events:none;
+  max-width:900px;
+}
+#toast.show{opacity:1}
+
+/* ===== 素材包弹窗 ===== */
+.modal{position:fixed;inset:0;background:rgba(30,15,10,.55);display:flex;align-items:center;justify-content:center;z-index:90}
+.modal-card{width:min(720px,92vw);max-height:88vh;display:flex;flex-direction:column;padding:16px 18px;gap:12px}
+.modal-head{display:flex;justify-content:space-between;align-items:center;font-size:24px;border-bottom:4px dotted var(--ink);padding-bottom:8px}
+#pack-list{flex:1;overflow:auto;display:flex;flex-direction:column;gap:8px;min-height:60px}
+.pack-row{display:flex;align-items:center;gap:10px;padding:8px 10px;border:3px solid var(--ink);background:#fff}
+.pack-row.off{opacity:.55}
+.pack-main{flex:1;display:grid;grid-template-columns:auto 1fr;grid-template-rows:auto auto;column-gap:10px;align-items:center;cursor:pointer;min-width:0}
+.pack-main input{grid-row:1/3;width:20px;height:20px;accent-color:var(--pink-deep)}
+.pack-name{font-size:17px}
+.pack-meta{font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pack-actions{display:flex;gap:6px}
+.add-row{display:flex;gap:8px}
+.add-row input{
+  flex:1;font-family:var(--font);font-size:15px;padding:8px 10px;
+  border:4px solid var(--ink);background:#fff;color:var(--ink);outline:none;
+}
+.add-row input:focus{background:#fff4f8}
+.modal-foot{display:flex;align-items:center;gap:8px}
+.spacer{flex:1}
+.modal-help{font-size:12px;line-height:1.5}
+
+/* ===== 加载遮罩 ===== */
+#loading{position:fixed;inset:0;background:#2b1d16;display:flex;align-items:center;justify-content:center;z-index:100;transition:opacity .3s}
+#loading.hide{opacity:0;pointer-events:none}
+.load-card{width:460px;padding:28px 30px;text-align:center}
+.load-title{font-size:32px;color:var(--pink-deep);letter-spacing:4px;margin-bottom:8px}
+.load-sub{font-size:14px;opacity:.7;margin-bottom:18px;min-height:1.4em}
+.bar-wrap{height:22px;border:4px solid var(--ink);background:#fff;padding:2px}
+#bar{height:100%;width:0;background:repeating-linear-gradient(90deg,var(--pink) 0 8px,var(--pink-deep) 8px 12px);transition:width .1s}

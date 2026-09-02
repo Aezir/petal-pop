@@ -1,0 +1,9 @@
+# 原始素材工作区与本地素材包不进游戏本体仓库
+# 素材包在独立仓库 Aezir/petal-pop-assets（packs/default 本身是那个仓库的工作副本）
+assets/
+packs/
+
+# 杂项
+Thumbs.db
+.DS_Store
+__pycache__/

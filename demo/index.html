@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>花漾贴贴 Petal Pop</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DotGothic16&display=swap" rel="stylesheet">
+<link href="https://cdnjs.cloudflare.com/ajax/libs/remixicon/4.2.0/remixicon.min.css" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div id="stage">
+  <!-- 底板（本子 / 以后的人偶板、房间） -->
+  <img id="board" alt="board" draggable="false" hidden>
+
+  <!-- 已贴贴纸层：铺满整张桌子 -->
+  <div id="layer"></div>
+
+  <!-- 贴纸册 -->
+  <div id="panel" class="px-box">
+    <div class="panel-head">
+      <span>贴纸册</span>
+      <span id="count" class="dim"></span>
+    </div>
+    <div id="sheet"></div>
+    <div class="panel-foot dim">拖出来贴到本子上 · 滚轮转 · Shift+滚轮缩放 · 双击撕掉 · Ctrl+Z 撤销</div>
+  </div>
+
+  <!-- 工具条 -->
+  <div id="toolbar">
+    <button id="btn-bgm" class="px-btn" title="音乐开关"><i class="ri-music-2-line"></i><span>音乐</span></button>
+    <button id="btn-board" class="px-btn" title="换一块底板"><i class="ri-book-2-line"></i><span>换本子</span></button>
+    <button id="btn-bg" class="px-btn" title="换桌面"><i class="ri-landscape-line"></i><span>换桌面</span></button>
+    <button id="btn-undo" class="px-btn" title="撤销 (Ctrl+Z)"><i class="ri-arrow-go-back-line"></i><span>撤销</span></button>
+    <button id="btn-clear" class="px-btn" title="全部撕掉"><i class="ri-eraser-line"></i><span>清空</span></button>
+    <button id="btn-packs" class="px-btn" title="素材包管理"><i class="ri-archive-2-line"></i><span>素材包</span></button>
+  </div>
+
+  <div id="toast" class="px-box"></div>
+</div>
+
+<!-- 素材包管理 -->
+<div id="modal" class="modal" hidden>
+  <div class="px-box modal-card">
+    <div class="modal-head">
+      <span>素材包</span>
+      <button id="btn-close" class="px-btn sm" title="关闭"><i class="ri-close-line"></i></button>
+    </div>
+    <div id="pack-list"></div>
+    <div class="add-row">
+      <input id="pack-input" placeholder="用户名/仓库名@标签  或  local:packs/xxx" spellcheck="false">
+      <button id="btn-add" class="px-btn"><i class="ri-add-line"></i>安装</button>
+    </div>
+    <div class="modal-foot">
+      <span id="storage" class="dim"></span>
+      <span class="spacer"></span>
+      <button id="btn-default" class="px-btn sm" title="重装 / 更新默认包"><i class="ri-home-4-line"></i>默认包</button>
+      <button id="btn-gc" class="px-btn sm" title="删掉没有任何包引用的文件"><i class="ri-brush-2-line"></i>清理</button>
+    </div>
+    <div class="dim modal-help">包格式说明见 docs/08-pack-format.md。只装你信得过的仓库；包里只会加载图片和音频，永远不会执行脚本。</div>
+  </div>
+</div>
+
+<!-- 加载 / 安装遮罩 -->
+<div id="loading">
+  <div class="px-box load-card">
+    <div class="load-title">花漾贴贴</div>
+    <div class="load-sub" id="load-text">启动中…</div>
+    <div class="bar-wrap"><div id="bar"></div></div>
+  </div>
+</div>
+
+<audio id="bgm" loop preload="none"></audio>
+
+<script type="module" src="js/app.js"></script>
+</body>
+</html>
