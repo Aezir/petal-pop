@@ -28,7 +28,9 @@
 
 ## 试玩
 
-双击 `start-demo.bat`（或在项目根目录执行 `python -m http.server 8765`），浏览器打开 `http://127.0.0.1:8765/demo/`。
+在线玩：<https://aezir.github.io/petal-pop/demo/>（首次打开会从 GitHub 下载默认素材包，之后走本地缓存）。
+
+本地玩：双击 `start-demo.bat`（或在项目根目录执行 `python -m http.server 8765`），浏览器打开 `http://127.0.0.1:8765/demo/`。
 不能直接双击 html 打开：素材要经 fetch 加载，file:// 下浏览器不允许。
 
 ```
@@ -42,3 +44,9 @@ packs/default/   默认素材包（第一个包，和别人做的包地位相同
 tools/make-manifest.py   给包目录生成 manifest.json
 assets/          原始素材工作区（出图、切图在这里，不被游戏直接读取）
 ```
+
+## 许可
+
+- **代码**（本仓库）：[PolyForm Noncommercial 1.0.0](LICENSE)。可以自由使用、修改、分发，**严禁任何商业用途**。使用时请保留声明：`Required Notice: Copyright Aezir (https://github.com/Aezir/petal-pop)`。
+- **素材**（[petal-pop-assets](https://github.com/Aezir/petal-pop-assets) 及默认包）：CC BY-NC-SA 4.0。署名、**禁止商用**、衍生素材必须以相同许可发布。
+- 共建的第三方素材包建议同样采用 CC BY-NC-SA 4.0，并在 manifest 的 `license` 字段写明。

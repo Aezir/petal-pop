@@ -48,7 +48,7 @@ my-pack/
 | `id` | 是 | 包的身份，全球唯一，**定下后永不改**。规则：小写字母/数字/`-`/`_`，字母数字开头，最长 64 |
 | `name` | 否 | 字符串，或 `{"zh":…, "en":…}` 多语言对象 |
 | `version` | 是 | 字符串，建议语义化版本 `主.次.补` |
-| `author` `license` `description` | 否 | 纯文本展示。共建包请一定写 license |
+| `author` `license` `description` | 否 | 纯文本展示。共建包请一定写 license，建议 `CC-BY-NC-SA-4.0`（禁止商用、衍生同许可） |
 
 ### 条目字段
 
