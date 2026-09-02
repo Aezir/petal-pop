@@ -35,32 +35,42 @@ export function sourceText(src) {
     : `${src.owner}/${src.repo}${src.ref ? '@' + src.ref : ''}`;
 }
 
-// 把来源解析成「文件基地址 + 版本锁」。GitHub 来源把分支/标签钉死到一个 commit，
-// 之后所有文件都从这个 commit 拉，别人再推新版本也不会悄悄变。
+// 把来源解析成「文件基地址 + 版本锁」。
+// GitHub 来源不走 GitHub API（匿名每小时只有 60 次，很容易用光），全靠 jsDelivr：
+//   写了 @版本  → 锁到这个标签 / 分支 / commit
+//   没写版本    → 问 jsDelivr 这个仓库最新的标签；一个标签都没有就用默认分支（靠清单哈希判断更新）
 export async function resolveSource(src) {
   if (src.kind === 'local') {
     const base = new URL('../' + src.path + '/', location.href).href;
     return { base, lock: null, label: '本地 ' + src.path };
   }
-  const ref = src.ref || 'HEAD';
-  const url = `https://api.github.com/repos/${src.owner}/${src.repo}/commits/${encodeURIComponent(ref)}`;
-  const r = await fetch(url, { headers: { Accept: 'application/vnd.github.sha' } });
-  if (!r.ok) throw new Error(`GitHub 上找不到 ${src.owner}/${src.repo}@${ref}（HTTP ${r.status}）`);
-  const sha = (await r.text()).trim();
-  if (!/^[0-9a-f]{40}$/.test(sha)) throw new Error('GitHub 返回的 commit 不对劲');
+  const { owner, repo } = src;
+  let ref = src.ref;
+  if (!ref) {
+    try {
+      const r = await fetch(`https://data.jsdelivr.com/v1/packages/gh/${owner}/${repo}`);
+      if (r.ok) ref = (await r.json()).versions?.[0]?.version || '';   // jsDelivr 会把 v1.0.0 记作 1.0.0
+    } catch {}
+  }
+  const at = ref ? '@' + ref : '';
+  // jsDelivr 单文件 20MB 上限，超了退回 GitHub raw（100MB 上限，也带跨域头）。
+  // raw 需要真实标签名，jsDelivr 可能去掉了 v 前缀，所以两种都试。
+  const rawRefs = ref ? [ref, 'v' + ref] : ['HEAD'];
   return {
-    base: `https://cdn.jsdelivr.net/gh/${src.owner}/${src.repo}@${sha}/`,
-    // jsDelivr 单文件 20MB 上限；超了退回 GitHub raw（100MB 上限，也带 CORS）
-    fallbackBase: `https://raw.githubusercontent.com/${src.owner}/${src.repo}/${sha}/`,
-    lock: sha,
-    label: `${src.owner}/${src.repo}@${sha.slice(0, 7)}`,
+    base: `https://cdn.jsdelivr.net/gh/${owner}/${repo}${at}/`,
+    fallbackBases: rawRefs.map(x => `https://raw.githubusercontent.com/${owner}/${repo}/${x}/`),
+    lock: ref || null,
+    label: `${owner}/${repo}${at || '@默认分支'}`,
   };
 }
 
 async function fetchFile(res, file) {
   const opts = res.lock ? {} : { cache: 'no-cache' };
   let r = await fetch(res.base + file, opts);
-  if (!r.ok && res.fallbackBase) r = await fetch(res.fallbackBase + file, opts);
+  for (const b of res.fallbackBases || []) {
+    if (r.ok) break;
+    r = await fetch(b + file, opts);
+  }
   return r;
 }
 
