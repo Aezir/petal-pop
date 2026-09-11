@@ -51,7 +51,6 @@ export function createRenderer({ stage, layer, boardWrap, boardEl, boardLayer, r
         el.classList.toggle('smooth', size.smooth);
       }
       placeStyle(el, it);
-      el.classList.toggle('selected', sel?.kind === 'item' && sel.uid === it.uid);
       seen.add(it.uid);
     }
     for (const [uid, el] of nodes) if (!seen.has(uid)) { el.remove(); nodes.delete(uid); }

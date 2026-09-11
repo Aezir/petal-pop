@@ -16,8 +16,6 @@ const vertexShader = /* glsl */ `
   uniform vec2 uDir;
   uniform float uFront;
   uniform float uR;
-  uniform float uLift;
-  uniform float uIsShadow;
   varying vec2 vUv;
   varying float vAngle;
   const float PI = 3.14159265;
@@ -37,30 +35,17 @@ const vertexShader = /* glsl */ `
     vUv = uv;
     float c = cos(uRot), sn = sin(uRot);
     vec2 w = vec2(c * q.x - sn * q.y, sn * q.x + c * q.y) + uCenter;
-    float z = q.z;
-    if (uIsShadow > 0.5) {
-      // 像素风硬阴影：贴平时偏 (3,4)，揭得越高、拿得越高，影子越远
-      w += vec2(3.0 + 11.0 * uLift + 0.5 * q.z, -(4.0 + 14.0 * uLift + 0.7 * q.z));
-      z = -10.0;
-    }
-    gl_Position = projectionMatrix * viewMatrix * vec4(w, z, 1.0);
+    gl_Position = projectionMatrix * viewMatrix * vec4(w, q.z, 1.0);
   }
 `;
 
 const fragmentShader = /* glsl */ `
   uniform sampler2D uMap;
-  uniform float uIsShadow;
-  uniform float uLift;
   varying vec2 vUv;
   varying float vAngle;
   void main() {
     vec4 t = texture2D(uMap, vUv);
     if (t.a < 0.4) discard;                 // 透明处不画：正反面都保留刀模轮廓
-    if (uIsShadow > 0.5) {
-      float k = 0.42 - 0.12 * uLift;
-      gl_FragColor = vec4(vec3(0.235, 0.118, 0.078) * k, k);
-      return;
-    }
     vec3 col = gl_FrontFacing ? t.rgb : vec3(0.969, 0.961, 0.949);   // 背面：略暖的白色离型纸
     float lifted = step(0.0001, vAngle);
     float crest = exp(-pow((vAngle - 1.5708) / 0.55, 2.0)) * lifted;  // 卷起的脊上一条亮带
@@ -81,20 +66,13 @@ export function createPeeler(canvas) {
   const U = {
     uCenter: { value: new THREE.Vector2() }, uRot: { value: 0 },
     uOrigin: { value: new THREE.Vector2() }, uDir: { value: new THREE.Vector2(1, 0) },
-    uFront: { value: 0 }, uR: { value: 12 }, uLift: { value: 0 }, uMap: { value: null },
+    uFront: { value: 0 }, uR: { value: 12 }, uMap: { value: null },
   };
-  const material = shadow => new THREE.ShaderMaterial({
-    uniforms: { ...U, uIsShadow: { value: shadow ? 1 : 0 } },
-    vertexShader, fragmentShader, side: THREE.DoubleSide,
-    transparent: shadow, premultipliedAlpha: shadow,
-    depthFunc: shadow ? THREE.LessDepth : THREE.LessEqualDepth,   // 影子自身重叠处不重复变暗
-  });
   let geo = new THREE.PlaneGeometry(1, 1);
-  const shade = new THREE.Mesh(geo, material(true)), face = new THREE.Mesh(geo, material(false));
-  shade.renderOrder = 0; face.renderOrder = 1;
-  shade.frustumCulled = face.frustumCulled = false;   // 顶点在着色器里挪了位置，包围盒不准
-  shade.visible = face.visible = false;
-  scene.add(shade, face);
+  const face = new THREE.Mesh(geo, new THREE.ShaderMaterial({ uniforms: U, vertexShader, fragmentShader, side: THREE.DoubleSide }));
+  face.frustumCulled = false;   // 顶点在着色器里挪了位置，包围盒不准
+  face.visible = false;
+  scene.add(face);
 
   const textures = new Map();
   // 按原大或放大显示时用最近邻（像素风不插值）；缩小显示时用平滑采样 + 多级纹理，否则锯齿闪烁
@@ -143,7 +121,7 @@ export function createPeeler(canvas) {
   function end(st) {
     if (active !== st) return;
     active = null;
-    shade.visible = face.visible = false;
+    face.visible = false;
     draw();
   }
 
@@ -160,14 +138,13 @@ export function createPeeler(canvas) {
     geo.dispose();
     const seg = v => Math.min(160, Math.max(8, Math.ceil(v / 3)));
     geo = new THREE.PlaneGeometry(w, h, seg(w), seg(h));
-    shade.geometry = face.geometry = geo;
+    face.geometry = geo;
     U.uMap.value = textureFor(key, img, smooth);
     U.uCenter.value.set(c.x, -c.y);
     U.uRot.value = -rot * PI / 180;
     U.uR.value = Math.max(5, Math.min(24, 0.12 * Math.min(w, h)));
     U.uFront.value = 0;
-    U.uLift.value = 0;
-    shade.visible = face.visible = true;
+    face.visible = true;
     const st = { dir: null, front: 0 };
     active = st;
     draw();
@@ -216,14 +193,13 @@ export function createPeeler(canvas) {
         const f0 = U.uFront.value;
         return animate(260, k => { U.uFront.value = f0 * Math.pow(1 - k, 3); }).then(() => end(st));
       },
-      // 揭下来了：卷边展平、抬起来，同时整张滑到 (x, y)——让捏住的那一点落在指尖下；然后交给普通图片接着跟手
+      // 揭下来了：卷边展平，同时整张滑到 (x, y)——让捏住的那一点落在指尖下；然后交给普通图片接着跟手
       detach(x, y) {
         const f0 = U.uFront.value, c0 = { x: U.uCenter.value.x, y: -U.uCenter.value.y };
         st.target = { x, y };
         return animate(180, k => {
           const e = 1 - (1 - k) * (1 - k);
           U.uFront.value = f0 * (1 - e);
-          U.uLift.value = e;
           U.uCenter.value.set(c0.x + (st.target.x - c0.x) * e, -(c0.y + (st.target.y - c0.y) * e));
         }).then(() => end(st));
       },

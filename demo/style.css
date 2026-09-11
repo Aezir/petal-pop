@@ -37,18 +37,14 @@ img{image-rendering:pixelated;image-rendering:crisp-edges}
 /* ===== 贴纸 ===== */
 /* 所有贴纸都不接指针事件：点到谁由 app.js 的命中检测按透明度判断 */
 #layer{position:absolute;inset:0;pointer-events:none;z-index:3}
-.placed{
-  position:absolute;pointer-events:none;
-  filter:drop-shadow(3px 4px 0 rgba(60,30,20,.45));
-}
-.placed.dragging{z-index:9999!important;filter:drop-shadow(14px 18px 0 rgba(60,30,20,.3));cursor:grabbing}
+/* 贴纸不加阴影：就是平平贴在桌上 / 本子上 */
+.placed{position:absolute;pointer-events:none}
+.placed.dragging{z-index:9999!important}
 .placed.missing{
   width:110px;height:110px;display:flex;align-items:center;justify-content:center;text-align:center;
   white-space:pre-line;font-size:12px;line-height:1.3;padding:6px;
   background:rgba(255,246,227,.85);border:3px dashed var(--ink);filter:none;
 }
-.placed.peel{animation:peel .22s steps(4) forwards}
-@keyframes peel{to{opacity:0;margin-top:-30px}}
 
 /* ===== 像素盒子 / 按钮 ===== */
 .px-box{
@@ -74,11 +70,6 @@ img{image-rendering:pixelated;image-rendering:crisp-edges}
 
 #toolbar{position:absolute;left:24px;top:20px;display:flex;gap:12px;z-index:50}
 
-/* 选中贴纸后的小工具条 */
-#mini{
-  position:absolute;transform:translateX(-50%);z-index:70;
-  display:flex;gap:6px;padding:6px;
-}
 
 .dim{opacity:.6;font-size:13px}
 
