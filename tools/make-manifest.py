@@ -23,7 +23,8 @@ TYPE_DIRS = {
 IMAGE_EXT = {'.png', '.jpg', '.jpeg', '.webp', '.gif'}
 AUDIO_EXT = {'.mp3', '.ogg', '.m4a'}
 ID_RE = re.compile(r'^[a-z0-9][a-z0-9_-]{0,63}$')
-KEEP_FIELDS = ('name', 'tags', 'anchor', 'license', 'author', 'deprecated')
+KEEP_FIELDS = ('name', 'tags', 'anchor', 'license', 'author', 'deprecated', 'sheet')
+PACK_KEEP_FIELDS = ('sheet', 'scale')   # 贴纸纸排版（tools/locate-on-sheet.py 写入）和手动缩放
 
 
 def sha256_of(path):
@@ -87,6 +88,9 @@ def main():
         'license': args.license or old.get('license', 'all-rights-reserved'),
         'description': old.get('description', ''),
     }
+    for k in PACK_KEEP_FIELDS:
+        if k in old:
+            manifest[k] = old[k]
     if not ID_RE.match(manifest['id']):
         sys.exit(f'包 id 不合法: {manifest["id"]}（只能小写字母/数字/-/_，字母数字开头）')
 

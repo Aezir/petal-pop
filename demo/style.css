@@ -10,7 +10,6 @@
 *{box-sizing:border-box}
 html,body{margin:0;height:100%;background:#2b1d16;overflow:hidden;font-family:var(--font);color:var(--ink);user-select:none;-webkit-user-select:none}
 img{image-rendering:pixelated;image-rendering:crisp-edges}
-img.smooth{image-rendering:auto}
 [hidden]{display:none!important}
 
 /* 舞台：固定 1672×941 逻辑坐标，用 transform 整体缩放适配窗口 */
@@ -24,47 +23,32 @@ img.smooth{image-rendering:auto}
 }
 
 /* ===== 本子 ===== */
-/* wrap 是一个 0×0 的锚点，位置 = 本子中心；缩放和翻转都以它为原点 */
+/* wrap 是一个 0×0 的锚点，位置 = 本子中心；贴在本子上的贴纸以它为原点 */
 #boardWrap{position:absolute;width:0;height:0;transform-origin:0 0;z-index:1}
 #board{
   position:absolute;left:0;top:0;width:760px;
   transform:translate(-50%,-50%);
   filter:drop-shadow(6px 8px 0 var(--shadow));
-  cursor:grab;
+  pointer-events:none;
 }
-#board:active{cursor:grabbing}
 #boardWrap.selected #board{filter:drop-shadow(6px 8px 0 var(--shadow)) drop-shadow(0 0 0 var(--pink)) drop-shadow(0 0 3px var(--pink-deep))}
 #boardLayer{position:absolute;left:0;top:0;width:0;height:0}
 
 /* ===== 贴纸 ===== */
-#layer{position:absolute;inset:0;pointer-events:none}
+/* 所有贴纸都不接指针事件：点到谁由 app.js 的命中检测按透明度判断 */
+#layer{position:absolute;inset:0;pointer-events:none;z-index:3}
 .placed{
-  position:absolute;pointer-events:auto;cursor:grab;
+  position:absolute;pointer-events:none;
   filter:drop-shadow(3px 4px 0 rgba(60,30,20,.45));
-  touch-action:none;
 }
-.placed:active{cursor:grabbing}
-.placed.selected{outline:3px dashed var(--pink-deep);outline-offset:4px}
-.placed.grouped{filter:drop-shadow(3px 4px 0 rgba(60,30,20,.45)) drop-shadow(0 0 2px rgba(226,67,127,.35))}
 .placed.dragging{z-index:9999!important;filter:drop-shadow(14px 18px 0 rgba(60,30,20,.3));cursor:grabbing}
 .placed.missing{
   width:110px;height:110px;display:flex;align-items:center;justify-content:center;text-align:center;
   white-space:pre-line;font-size:12px;line-height:1.3;padding:6px;
   background:rgba(255,246,227,.85);border:3px dashed var(--ink);filter:none;
 }
-.placed.stick{animation:stick .25s steps(4) both}
-@keyframes stick{
-  0%{filter:drop-shadow(12px 16px 0 rgba(60,30,20,.25));margin-top:-12px}
-  100%{filter:drop-shadow(3px 4px 0 rgba(60,30,20,.45));margin-top:0}
-}
 .placed.peel{animation:peel .22s steps(4) forwards}
 @keyframes peel{to{opacity:0;margin-top:-30px}}
-.placed.peel-off{animation:peeloff .45s steps(5) both}
-@keyframes peeloff{
-  0%{margin-top:0}
-  40%{margin-top:-18px;filter:drop-shadow(16px 22px 0 rgba(60,30,20,.25))}
-  100%{margin-top:0}
-}
 
 /* ===== 像素盒子 / 按钮 ===== */
 .px-box{
@@ -90,63 +74,51 @@ img.smooth{image-rendering:auto}
 
 #toolbar{position:absolute;left:24px;top:20px;display:flex;gap:12px;z-index:50}
 
-/* 选中后的小工具条 */
+/* 选中贴纸后的小工具条 */
 #mini{
   position:absolute;transform:translateX(-50%);z-index:70;
   display:flex;gap:6px;padding:6px;
 }
-#mini[data-kind="board"] .only-item{display:none}
 
-/* ===== 贴纸册面板 ===== */
-#panel{
-  position:absolute;right:28px;top:24px;width:400px;height:893px;
-  display:flex;flex-direction:column;z-index:40;padding:10px;
-  transition:width .15s steps(3);
-}
-.panel-head{
-  display:flex;align-items:center;gap:8px;
-  font-size:22px;padding:2px 4px 10px;border-bottom:4px dotted var(--ink);
-}
-.panel-title{flex:1}
-.fold{
-  border:3px solid var(--ink);background:var(--paper);color:var(--ink);cursor:pointer;
-  width:30px;height:30px;display:flex;align-items:center;justify-content:center;padding:0;
-  box-shadow:2px 2px 0 var(--shadow);
-}
-.fold i{font-size:18px}
-.fold:hover{background:#ffe9f2}
 .dim{opacity:.6;font-size:13px}
-.panel-foot{padding:10px 4px 2px;line-height:1.5}
-#sheet{
-  flex:1;overflow-y:auto;overflow-x:hidden;
-  display:grid;grid-template-columns:repeat(3,1fr);gap:8px;padding:10px 4px;
-  align-content:start;
-  scrollbar-width:thin;scrollbar-color:var(--ink) transparent;
-}
-/* 折叠：缩成右侧一条竖签 */
-#panel.collapsed{width:60px;cursor:pointer;padding:10px 6px}
-#panel.collapsed .panel-head{flex-direction:column;border-bottom:0;padding:0}
-#panel.collapsed .panel-title{writing-mode:vertical-rl;letter-spacing:6px;margin-top:12px}
-#panel.collapsed .fold i{transform:scaleX(-1)}
-#panel.collapsed #count,#panel.collapsed #sheet,#panel.collapsed .panel-foot{display:none}
 
-.pack-head{grid-column:1/-1;font-size:14px;opacity:.7;padding:6px 2px 0;border-top:3px dotted rgba(74,46,34,.3)}
-.pack-head:first-child{border-top:0;padding-top:0}
-.thumb{
-  aspect-ratio:1/1;display:flex;align-items:center;justify-content:center;
-  border:3px dashed transparent;cursor:grab;position:relative;touch-action:none;
+/* ===== 贴纸纸（桌上的一张印刷贴纸纸） ===== */
+/* 位置 = 纸的中心，尺寸由 sheet.js 按包的排版算出来；和本子一样是桌上的物件，压在本子上面、桌面贴纸下面 */
+#sheetObj{position:absolute;z-index:2;filter:drop-shadow(6px 8px 0 var(--shadow));pointer-events:none}
+.sheet-paper{
+  position:absolute;inset:0;border:4px solid var(--ink);border-radius:14px;overflow:hidden;
+  background:
+    radial-gradient(circle,rgba(255,255,255,.6) 0 3px,transparent 3.5px) 0 0/26px 26px,
+    radial-gradient(circle,rgba(255,255,255,.35) 0 2px,transparent 2.5px) 13px 13px/26px 26px,
+    linear-gradient(160deg,#ffdcea,#ffc6dd 60%,#f9b7d2);
 }
-.thumb img{max-width:92%;max-height:92%;pointer-events:none;
-  filter:drop-shadow(2px 3px 0 rgba(60,30,20,.3))}
-.thumb:hover img{transform:translate(-2px,-3px) rotate(-3deg)}
-.thumb.peeling img{animation:thumbpeel .4s steps(4) both}
-@keyframes thumbpeel{
-  0%{transform:translate(-2px,-3px) rotate(-3deg);opacity:1}
-  100%{transform:translate(-30px,-40px) rotate(-25deg);opacity:0}
+.sheet-paper::before{content:'';position:absolute;inset:7px 7px 34px;border:2px dashed rgba(255,255,255,.85);border-radius:8px}
+#sheetSlots{position:absolute;inset:0}
+/* 一格贴纸：外形按贴纸自己的透明度裁出来；贴纸撕走后，这格的底色就是底纸上亮面的刀模空位 */
+.slot{
+  position:absolute;
+  -webkit-mask:var(--m) center/100% 100% no-repeat;mask:var(--m) center/100% 100% no-repeat;
+  background:linear-gradient(135deg,rgba(255,255,255,.9),rgba(255,255,255,.4) 45%,rgba(255,255,255,.75));
 }
-/* 撕走后留下的空位 */
-.thumb.used{border-color:rgba(74,46,34,.35);cursor:default;pointer-events:none;background:rgba(74,46,34,.05)}
-.thumb.used img{opacity:.12;filter:none}
+.slot img{display:block;width:100%;height:100%}
+.slot.used img{visibility:hidden}
+/* 缩小显示的贴纸用平滑采样（像素画缩小时硬采样会出锯齿） */
+.slot.smooth img,.placed.smooth{image-rendering:auto}
+.sheet-foot{
+  position:absolute;left:0;right:0;bottom:5px;height:24px;display:flex;justify-content:center;align-items:center;gap:10px;
+  font-size:15px;color:var(--ink);letter-spacing:1px;
+}
+#sheetObj.single .sheet-btn,#sheetObj.single #sheetPage{display:none}
+.sheet-btn{
+  pointer-events:auto;cursor:pointer;width:22px;height:22px;padding:0;display:flex;align-items:center;justify-content:center;
+  border:3px solid var(--ink);background:var(--paper);color:var(--ink);box-shadow:2px 2px 0 var(--shadow);
+}
+.sheet-btn i{font-size:20px}
+.sheet-btn:hover{background:#ffe9f2}
+.sheet-btn:disabled{opacity:.35;cursor:default}
+
+/* 撕贴纸的 WebGL 层：盖满舞台，不接事件 */
+#peel{position:absolute;left:0;top:0;width:1672px;height:941px;pointer-events:none;z-index:65}
 
 /* ===== 提示 ===== */
 #toast{

@@ -1,18 +1,20 @@
 // 游戏状态：装机清单 + 作品列表 + 设置。
 // 规矩：画面永远从这里算出来；改状态只走 apply(action)；读旧存档走 normalize()。
-export const STATE_VERSION = 3;
+export const STATE_VERSION = 4;
 const DEFAULT_PACK = 'petalpop-default';
 
-// 本子默认摆在桌面空位中央；s 是缩放，flip 是水平翻转
-export const BOARD_DEFAULT = { x: 830, y: 585, s: 1, flip: false };
-// 放大上限：像素素材超过 2 倍就明显糊，本子更保守
-export const SCALE = { item: [0.5, 2], board: [0.6, 1.6] };
+// 本子默认摆在桌面空位中央。贴纸和本子都是原始大小，不缩放、不翻转。
+// BOARD_DEFAULT 是老存档里本子的位置（读旧档时兜底用）；新开的本子摆在左边，给右边的贴纸纸让位
+export const BOARD_DEFAULT = { x: 830, y: 585 };
+const BOARD_START = { x: 420, y: 560 };
+// 贴纸纸默认摆在桌面右下；page 是当前摆出来的是第几个包的纸（从 0 数）
+export const SHEET_DEFAULT = { x: 1262, y: 640, page: 0 };
 
 const clamp = (v, [lo, hi]) => Math.min(hi, Math.max(lo, v));
 const r2 = v => +(+v).toFixed(2);
 
 export function makeProject(id, name) {
-  return { id, name, board: null, background: null, boardT: { ...BOARD_DEFAULT }, seq: 1, items: [] };
+  return { id, name, board: null, background: null, boardT: { ...BOARD_START }, sheetT: { ...SHEET_DEFAULT }, seq: 1, items: [] };
 }
 
 export function makeState() {
@@ -20,29 +22,32 @@ export function makeState() {
     version: STATE_VERSION,
     activeProject: 'p1',
     projects: { p1: makeProject('p1', '我的本子') },
-    settings: { bgm: true, bgmRef: null, volume: 0.5, panelOpen: true },
+    settings: { bgm: true, bgmRef: null, volume: 0.5 },
     packs: {},          // 包 id → { enabled, order }
   };
 }
 
 // 贴纸条目字段：
-//   on    'desk' 贴在桌面（x,y 是舞台坐标）| 'board' 贴在本子上（x,y 是本子局部坐标，跟本子一起缩放翻转）
-//   group 成组编号，同组一起挪；null 表示单独
-//   flip  水平翻转
-function normItem(i, boardT, legacy) {
+//   on  'desk' 贴在桌面（x,y 是舞台坐标）| 'board' 贴在本子上（x,y 是相对本子中心的坐标，跟本子一起挪）
+//   rot 旋转角度
+// oldT 是本子在旧存档里的样子（v3 及以前可能带缩放 s 和翻转 flip），只用来迁移坐标
+function normItem(i, oldT, legacy) {
+  const { s, group, flip, ...rest } = i;   // v4 去掉了缩放、成组、翻转
   const it = {
-    ...i,
-    uid: +i.uid || 0, x: +i.x || 0, y: +i.y || 0, rot: +i.rot || 0,
-    s: clamp(+i.s || 1, SCALE.item), z: +i.z || 0,
-    flip: !!i.flip,
+    ...rest,
+    uid: +i.uid || 0, x: +i.x || 0, y: +i.y || 0, rot: +i.rot || 0, z: +i.z || 0,
     on: i.on === 'board' ? 'board' : 'desk',
-    group: i.group == null ? null : +i.group,
   };
-  // 旧存档（没有 on 字段）：落在本子范围内的贴纸转成本子坐标
-  if (legacy && Math.abs(it.x - boardT.x) <= 380 && Math.abs(it.y - boardT.y) <= 240) {
-    it.on = 'board';
-    it.x = r2((it.x - boardT.x) / boardT.s);
-    it.y = r2((it.y - boardT.y) / boardT.s);
+  if (legacy) {
+    // 旧存档（没有 on 字段）：落在本子范围内的贴纸转成本子坐标
+    if (Math.abs(it.x - oldT.x) <= 380 && Math.abs(it.y - oldT.y) <= 240) {
+      it.on = 'board';
+      it.x = r2((it.x - oldT.x) / oldT.s);
+      it.y = r2((it.y - oldT.y) / oldT.s);
+    }
+  } else if (it.on === 'board' && oldT.flip) {
+    // v3 本子翻过面：去掉翻转后把贴纸镜像回原来看到的位置
+    it.x = r2(-it.x);
   }
   return it;
 }
@@ -62,14 +67,17 @@ export function normalize(raw) {
     p.board ??= null;
     p.background ??= null;
     const t = { ...BOARD_DEFAULT, ...(p.boardT || {}) };
-    p.boardT = { x: +t.x || BOARD_DEFAULT.x, y: +t.y || BOARD_DEFAULT.y, s: clamp(+t.s || 1, SCALE.board), flip: !!t.flip };
+    const oldT = { x: +t.x || BOARD_DEFAULT.x, y: +t.y || BOARD_DEFAULT.y, s: +t.s || 1, flip: !!t.flip };
+    p.boardT = { x: oldT.x, y: oldT.y };
+    const st = { ...SHEET_DEFAULT, ...(p.sheetT || {}) };
+    p.sheetT = { x: +st.x || SHEET_DEFAULT.x, y: +st.y || SHEET_DEFAULT.y, page: Math.max(0, Math.floor(+st.page) || 0) };
     p.items = (Array.isArray(p.items) ? p.items : [])
       .filter(i => i && typeof i.ref === 'string')
-      .map(i => normItem(i, p.boardT, !('on' in i)));
-    p.seq = Math.max(+p.seq || 1, ...p.items.map(i => i.uid + 1), ...p.items.map(i => i.z + 1), ...p.items.map(i => (i.group ?? 0) + 1));
+      .map(i => normItem(i, oldT, !('on' in i)));
+    p.seq = Math.max(+p.seq || 1, ...p.items.map(i => i.uid + 1), ...p.items.map(i => i.z + 1));
   }
   if (!s.projects[s.activeProject]) s.activeProject = Object.keys(s.projects)[0];
-  s.settings = { bgm: true, bgmRef: null, volume: 0.5, panelOpen: true, ...(s.settings || {}) };
+  s.settings = { bgm: true, bgmRef: null, volume: 0.5, ...(s.settings || {}) };
   s.settings.volume = clamp(+s.settings.volume || 0, [0, 1]);
   s.packs = (s.packs && typeof s.packs === 'object') ? s.packs : {};
   return s;
@@ -82,10 +90,11 @@ function fromV1(v1) {
   const nb = String((Number(v1.notebook) || 0) + 1).padStart(2, '0');
   p.board = `${DEFAULT_PACK}:notebook-${nb}`;
   p.background = `${DEFAULT_PACK}:desk-${v1.theme === 'night' ? 'night' : 'day'}`;
+  p.boardT = { ...BOARD_DEFAULT };   // 最早那版的本子在老位置，贴纸坐标按它换算
   s.settings.bgm = v1.bgm !== false;
   p.items = (v1.placed || []).map(i => ({
     uid: i.uid, ref: `${DEFAULT_PACK}:${String(i.f).replace(/\.png$/i, '')}`,
-    x: i.x, y: i.y, rot: i.rot, s: i.s, z: i.z,
+    x: i.x, y: i.y, rot: i.rot, z: i.z,
   }));
   p.seq = +v1.seq || 1;
   return s;
@@ -93,11 +102,6 @@ function fromV1(v1) {
 
 export const project = state => state.projects[state.activeProject];
 export const findItem = (p, uid) => p.items.find(i => i.uid === uid);
-export const groupOf = (p, uid) => {
-  const it = findItem(p, uid);
-  if (!it) return [];
-  return it.group == null ? [it] : p.items.filter(i => i.group === it.group);
-};
 
 // 动作都是纯数据（可存、可回放）。返回值：place 返回新贴纸的 uid。
 export function apply(state, a) {
@@ -105,34 +109,26 @@ export function apply(state, a) {
   switch (a.type) {
     case 'place': {
       const uid = p.seq++;
-      p.items.push({
-        uid, ref: a.ref, x: a.x, y: a.y, rot: a.rot ?? 0, s: clamp(a.s ?? 1, SCALE.item),
-        z: p.seq++, flip: !!a.flip, on: a.on === 'board' ? 'board' : 'desk', group: null,
-      });
+      p.items.push({ uid, ref: a.ref, x: a.x, y: a.y, rot: a.rot ?? 0, z: p.seq++, on: a.on === 'board' ? 'board' : 'desk' });
       return uid;
     }
-    case 'moveMany':          // [{uid, x, y, on?}]
-      for (const m of a.items) {
-        const it = findItem(p, m.uid);
-        if (!it) continue;
-        it.x = r2(m.x); it.y = r2(m.y);
-        if (m.on) it.on = m.on === 'board' ? 'board' : 'desk';
-      }
-      return;
-    case 'transform': {
+    case 'move': {            // { uid, x, y, on? }
       const it = findItem(p, a.uid);
       if (!it) return;
-      if (a.rot != null) it.rot = r2(a.rot);
-      if (a.s != null) it.s = r2(clamp(a.s, SCALE.item));
-      if (a.flip != null) it.flip = !!a.flip;
+      it.x = r2(a.x); it.y = r2(a.y);
+      if (a.on) it.on = a.on === 'board' ? 'board' : 'desk';
       return;
     }
-    case 'front':
-      for (const uid of a.uids) { const it = findItem(p, uid); if (it) it.z = p.seq++; }
+    case 'rotate': {          // { uid, rot }
+      const it = findItem(p, a.uid);
+      if (it) it.rot = r2(a.rot);
       return;
-    case 'group':             // { uids, group }  group 为 null 即拆开
-      for (const uid of a.uids) { const it = findItem(p, uid); if (it) it.group = a.group; }
+    }
+    case 'front': {
+      const it = findItem(p, a.uid);
+      if (it) it.z = p.seq++;
       return;
+    }
     case 'remove': {
       const set = new Set(a.uids);
       p.items = p.items.filter(i => !set.has(i.uid));
@@ -141,14 +137,9 @@ export function apply(state, a) {
     case 'clear': p.items = []; return;
     case 'setBoard': p.board = a.ref; return;
     case 'setBackground': p.background = a.ref; return;
-    case 'boardSet': {        // { x?, y?, s?, flip? }
-      const t = p.boardT;
-      if (a.x != null) t.x = r2(a.x);
-      if (a.y != null) t.y = r2(a.y);
-      if (a.s != null) t.s = r2(clamp(a.s, SCALE.board));
-      if (a.flip != null) t.flip = !!a.flip;
-      return;
-    }
+    case 'boardMove': p.boardT.x = r2(a.x); p.boardT.y = r2(a.y); return;
+    case 'sheetMove': p.sheetT.x = r2(a.x); p.sheetT.y = r2(a.y); return;
+    case 'sheetPage': p.sheetT.page = Math.max(0, a.page | 0); return;
     case 'setSetting': Object.assign(state.settings, a.patch); return;
     case 'setBgm':
       if (a.on != null) state.settings.bgm = !!a.on;

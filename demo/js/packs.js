@@ -7,6 +7,9 @@ export const FORMAT_VERSION = 1;
 // 内核认识的内容类型 → 文件种类
 export const TYPES = { sticker: 'image', board: 'image', background: 'image', bgm: 'audio' };
 export const LIMITS = { fileBytes: 32 * 1024 * 1024, entries: 2000, packBytes: 300 * 1024 * 1024 };
+// 安装器版本：安装记录里开始存新字段时加一（2：贴纸纸排版 sheet/scale）。
+// 旧安装器装的记录缺这些字段，启动时自动重装一次；文件没变的不重下
+export const INSTALLER = 2;
 
 const IMAGE_EXT = /\.(png|jpe?g|webp|gif)$/i;
 const AUDIO_EXT = /\.(mp3|ogg|m4a)$/i;
@@ -103,10 +106,16 @@ export function validateManifest(json) {
     if (e.sha256) out.sha256 = e.sha256;
     if (Number.isFinite(e.w) && Number.isFinite(e.h)) { out.w = e.w; out.h = e.h; }
     for (const k of ['name', 'tags', 'anchor', 'deprecated']) if (e[k] != null) out[k] = e[k];
+    if (Number.isFinite(e.sheet?.x) && Number.isFinite(e.sheet?.y)) out.sheet = { x: e.sheet.x, y: e.sheet.y };
     return out;
   });
 
+  // 可选：贴纸纸原图尺寸（配合条目的 sheet 位置照原样排版），手动缩放比例
+  const sheet = json.sheet?.w > 0 && json.sheet?.h > 0 ? { w: json.sheet.w, h: json.sheet.h } : null;
+  const scale = Number.isFinite(json.scale) && json.scale > 0 && json.scale <= 4 ? json.scale : null;
+
   return {
+    sheet, scale,
     formatVersion: fv,
     id: json.id,
     name: json.name ?? json.id,
@@ -171,14 +180,23 @@ export async function installPack(text, onProgress = () => {}) {
   const man = validateManifest(json);
 
   const existing = await DB.get('packs', man.id);
-  if (existing && existing.manifestSha256 === manifestSha256 && existing.lock === res.lock) {
+  if (existing && existing.manifestSha256 === manifestSha256 && existing.lock === res.lock && existing.installer === INSTALLER) {
     return { pack: existing, unchanged: true };
   }
 
   const total = man.entries.length;
   let done = 0, bytes = 0;
   const entries = new Array(total);
+  const known = new Map((existing?.entries || []).map(e => [e.sha256, e]));
   await pool(man.entries.map((e, i) => [e, i]), 6, async ([e, i]) => {
+    // 增量更新：清单写了哈希、这份字节上次已经体检过并存在库里，就不用再下载
+    const prev = e.sha256 && known.get(e.sha256);
+    if (prev && await DB.has('blobs', e.sha256)) {
+      entries[i] = { ...e, ...(prev.w != null && { w: prev.w, h: prev.h }), sha256: e.sha256, bytes: prev.bytes };
+      bytes += prev.bytes;
+      onProgress({ phase: 'files', done: ++done, total, bytes });
+      return;
+    }
     const r = await fetchFile(res, e.file);
     if (!r.ok) throw new Error(`下载失败 ${e.file}（HTTP ${r.status}）`);
     const blob = await r.blob();
@@ -196,8 +214,9 @@ export async function installPack(text, onProgress = () => {}) {
   const pack = {
     id: man.id, name: man.name, version: man.version, author: man.author,
     license: man.license, description: man.description, formatVersion: man.formatVersion,
+    sheet: man.sheet, scale: man.scale,
     source: sourceText(src), base: res.base, lock: res.lock, label: res.label,
-    manifestSha256, installedAt: Date.now(), bytes, entries,
+    manifestSha256, installer: INSTALLER, installedAt: Date.now(), bytes, entries,
   };
   await DB.put('packs', man.id, pack);
   return { pack, unchanged: false, updated: !!existing };

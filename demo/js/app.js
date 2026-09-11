@@ -2,26 +2,30 @@
 // 内核只认四种槽位：background / board / sticker / bgm。所有内容都来自素材包。
 import { DB } from './db.js';
 import * as Packs from './packs.js';
-import { normalize, apply, project, findItem, groupOf, STATE_VERSION, SCALE } from './state.js';
+import { normalize, apply, project, findItem, STATE_VERSION } from './state.js';
 import { createRenderer } from './render.js';
+import { createSheet } from './sheet.js';
+import { silhouetteOf } from './silhouette.js';
+import { createPeeler, DETACH_AT } from './peel.js';
 
 const STAGE_W = 1672, STAGE_H = 941;
 // 默认包来源，按顺序试：本地开发目录 → GitHub 资源仓库（线上部署时本地目录不存在）
 const DEFAULT_SOURCES = ['local:packs/default', 'Aezir/petal-pop-assets'];
-const LONG_PRESS_MS = 600;     // 长按多久算“撕”
-const DRAG_THRESHOLD = 6;      // 移动超过多少舞台像素才算拖动
 const $ = s => document.querySelector(s);
 
 const stage = $('#stage'), layer = $('#layer'), boardWrap = $('#boardWrap'), boardEl = $('#board'),
-      boardLayer = $('#boardLayer'), sheet = $('#sheet'), panel = $('#panel'), countEl = $('#count'),
-      toast = $('#toast'), audio = $('#bgm'), loading = $('#loading'), loadText = $('#load-text'),
+      boardLayer = $('#boardLayer'), toast = $('#toast'), audio = $('#bgm'), loading = $('#loading'), loadText = $('#load-text'),
       bar = $('#bar'), modal = $('#modal'), packList = $('#pack-list'), mini = $('#mini');
+
+// 撕贴纸用的 WebGL 层；浏览器不支持 WebGL 时为 null，贴纸从边缘按下就直接拿起
+const peeler = createPeeler($('#peel'));
 
 // ---------- 舞台缩放 ----------
 let scale = 1;
 function fit() {
   scale = Math.min(innerWidth / STAGE_W, innerHeight / STAGE_H);
   stage.style.transform = `translate(-50%,-50%) scale(${scale})`;
+  peeler?.resize(scale);
 }
 addEventListener('resize', () => { fit(); placeMini(); });
 fit();
@@ -81,12 +85,37 @@ let sel = null;   // { kind:'item', uid } | { kind:'board' } | null
 function select(s) { sel = s; }
 
 // ---------- 渲染 ----------
-const renderer = createRenderer({ stage, layer, boardWrap, boardEl, boardLayer, sheet, countEl, resolveRef, bindItem });
+const sheet = createSheet({
+  root: $('#sheetObj'), slotsEl: $('#sheetSlots'), titleEl: $('#sheetTitle'), pageEl: $('#sheetPage'),
+  urlOf: Packs.urlSync, nameOf: Packs.displayName,
+});
+// 贴纸的显示尺寸 = 原图尺寸 × 所在包的缩放比例（由这个包的贴纸纸摆上桌的大小决定，见 sheet.js）
+function sizeOf(ref) {
+  const h = resolveRef(ref);
+  if (!h) return null;
+  const k = sheet.scaleOf(h.pack.id);
+  return { w: h.entry.w * k, h: h.entry.h * k, smooth: k < 0.999 };
+}
+const renderer = createRenderer({ stage, layer, boardWrap, boardEl, boardLayer, resolveRef, sizeOf });
+const usedRefs = () => new Set(project(state).items.map(i => i.ref));
+// 同步重画（图片地址已经备好时用）。先画纸：纸算出各包的缩放，贴纸按它定尺寸
+function paint() {
+  sheet.render(project(state), enabledPacks, usedRefs());
+  renderer.render(state, view(), sel);
+}
+// 纸整张留在桌面内（换了更大的纸、或者旧存档的位置靠边时）
+function clampSheet() {
+  const s = sheet.size();
+  if (!s) return;
+  const t = project(state).sheetT;
+  const x = Math.min(Math.max(t.x, s.w / 2), STAGE_W - s.w / 2);
+  const y = Math.min(Math.max(t.y, s.h / 2), STAGE_H - s.h / 2);
+  if (x !== t.x || y !== t.y) apply(state, { type: 'sheetMove', x, y });
+}
 async function render() {
   await ensureUrls();
-  renderer.render(state, enabledPacks, view(), sel);
+  paint();
   syncBgm();
-  syncPanel();
   placeMini();
 }
 
@@ -125,206 +154,158 @@ function inside(el, e) {
   const r = el.getBoundingClientRect();
   return e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
 }
-// 舞台坐标 ⇄ 本子局部坐标（考虑本子的缩放和翻转）
-function stageToLocal(pt, t) { const x = (pt.x - t.x) / t.s; return { x: t.flip ? -x : x, y: (pt.y - t.y) / t.s }; }
-function localToStage(pt, t) { const x = t.flip ? -pt.x : pt.x; return { x: t.x + x * t.s, y: t.y + pt.y * t.s }; }
+// 舞台坐标 ⇄ 本子局部坐标（以本子中心为原点）
+const stageToLocal = (pt, t) => ({ x: pt.x - t.x, y: pt.y - t.y });
+const localToStage = (pt, t) => ({ x: t.x + pt.x, y: t.y + pt.y });
 const itemStagePos = (it, t) => (it.on === 'board' ? localToStage(it, t) : { x: it.x, y: it.y });
 const overBoard = e => !boardWrap.hidden && inside(boardEl, e);
-const overPanel = e => state.settings.panelOpen && inside(panel, e);
-const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
-
-// 组里只剩一张就解散
-function tidyGroups() {
-  const p = project(state);
-  const count = {};
-  for (const it of p.items) if (it.group != null) count[it.group] = (count[it.group] || 0) + 1;
-  const lonely = p.items.filter(it => it.group != null && count[it.group] < 2).map(it => it.uid);
-  if (lonely.length) apply(state, { type: 'group', uids: lonely, group: null });
+// 舞台上的一段位移 → 贴纸自身坐标（去掉贴纸的旋转，y 向下）
+function unrotate(dx, dy, rot) {
+  const r = -rot * Math.PI / 180, c = Math.cos(r), s = Math.sin(r);
+  return { x: dx * c - dy * s, y: dx * s + dy * c };
 }
 
-// ---------- 拖拽：撕下 / 挪动 / 成组 / 撕开 ----------
+// ---------- 命中检测 ----------
+// 舞台上的指针事件统一在这里判断点到了谁，从上往下找：桌上的贴纸 → 贴纸页上的贴纸 → 贴纸页 → 本子上的贴纸 → 本子。
+// 贴纸只认图案本身（透明的角落点不到）；离轮廓边缘近的地方才撕得起来（edge）。
+function hitSticker(pt, c, rot, ref, el) {
+  const h = resolveRef(ref), size = sizeOf(ref);
+  const w = size ? size.w : 110, hh = size ? size.h : 110;   // 缺图的占位块是 110×110
+  const l = unrotate(pt.x - c.x, pt.y - c.y, rot);
+  if (Math.abs(l.x) > w / 2 || Math.abs(l.y) > hh / 2) return null;
+  const sil = h && el?.tagName === 'IMG' ? silhouetteOf(`${h.entry.sha256}@${Math.round(w)}`, el, w, hh) : null;
+  if (sil && !sil.opaque(l.x, l.y)) return null;
+  return { local: l, sil, w, h: hh, smooth: !!size?.smooth, c, rot, ref, el, edge: sil ? sil.nearEdge(l.x, l.y) : true };
+}
+function hitTest(e) {
+  const pt = toStage(e), p = project(state), byZ = (a, b) => b.z - a.z;
+  for (const it of p.items.filter(i => i.on === 'desk').sort(byZ)) {
+    const hit = hitSticker(pt, { x: it.x, y: it.y }, it.rot, it.ref, renderer.node(it.uid));
+    if (hit) return { kind: 'item', uid: it.uid, ...hit };
+  }
+  for (const s of sheet.freeSlots()) {
+    const hit = hitSticker(pt, s.c, s.rot, s.ref, s.img);
+    if (hit) return { kind: 'slot', ...hit };
+  }
+  if (sheet.contains(pt)) return { kind: 'sheet' };
+  if (boardWrap.hidden) return null;
+  for (const it of p.items.filter(i => i.on === 'board').sort(byZ)) {
+    const hit = hitSticker(pt, localToStage(it, p.boardT), it.rot, it.ref, renderer.node(it.uid));
+    if (hit) return { kind: 'item', uid: it.uid, ...hit };
+  }
+  return inside(boardEl, e) ? { kind: 'board' } : null;
+}
+const cursorFor = hit => !hit ? '' : hit.kind === 'board' || hit.kind === 'sheet' ? 'move' : hit.edge ? 'grab' : 'default';
+
+// ---------- 撕、拿、贴 ----------
+// drag = { kind:'peel', src, handle, start }            正在从边缘揭起，还没离开
+// drag = { kind:'hold', uid, dx, dy, handle, unrolling } 整张拿在手上，跟着手走
+// drag = { kind:'board' | 'sheet', dx, dy }             挪本子 / 挪贴纸页
 let drag = null;
-// drag = { kind:'item', grab, uids, offsets(uid→{dx,dy}), start, moved, fresh, lifted, timer }
-// drag = { kind:'board', dx, dy, moved }
+let hintAt = 0;
 
-function startItemDrag(e, uid, fresh) {
-  const p = project(state), t = p.boardT;
-  const uids = groupOf(p, uid).map(i => i.uid);
-  apply(state, { type: 'front', uids });
-  const pt = toStage(e);
-  const offsets = new Map(uids.map(u => {
-    const sp = itemStagePos(findItem(p, u), t);
-    return [u, { dx: sp.x - pt.x, dy: sp.y - pt.y }];
-  }));
-  drag = { kind: 'item', grab: uid, uids, offsets, start: pt, moved: false, fresh, lifted: fresh, timer: null };
-  if (!fresh) drag.timer = setTimeout(longPress, LONG_PRESS_MS);
-  select({ kind: 'item', uid });
-  render().then(() => { if (drag?.fresh) renderer.node(uid)?.classList.add('dragging'); });
-}
+stage.addEventListener('pointerdown', e => {
+  if (e.button !== 0 || e.target.closest('button')) return;
+  e.preventDefault();
+  const hit = hitTest(e), pt = toStage(e), p = project(state);
+  if (!hit) { select(null); render(); return; }
+  if (hit.kind === 'board' || hit.kind === 'sheet') {
+    const t = hit.kind === 'board' ? p.boardT : p.sheetT;
+    snapshot();
+    drag = { kind: hit.kind, dx: t.x - pt.x, dy: t.y - pt.y };
+    select(hit.kind === 'board' ? { kind: 'board' } : null);
+    render();
+    return;
+  }
+  if (hit.kind === 'item') select({ kind: 'item', uid: hit.uid });
+  if (!hit.edge) {
+    // 按在贴纸中间：真贴纸抠不起来，只是选中它
+    if (Date.now() - hintAt > 4000) { hintAt = Date.now(); showToast('从贴纸边缘撕起来'); }
+    render();
+    return;
+  }
+  stage.style.cursor = 'grabbing';
+  startPeel(hit, pt);
+});
 
-// 长按：把这张贴纸从组里撕开
-function longPress() {
-  if (!drag || drag.kind !== 'item' || drag.moved) return;
-  const p = project(state);
-  const it = findItem(p, drag.grab);
-  if (!it || it.group == null) return;
-  apply(state, { type: 'group', uids: [it.uid], group: null });
-  tidyGroups();
-  drag.uids = [it.uid];
-  const el = renderer.node(it.uid);
-  el?.classList.add('peel-off');
-  setTimeout(() => el?.classList.remove('peel-off'), 500);
-  showToast('撕开了，现在可以单独挪');
-  save();
-  render();
-}
-
-// 拖动开始：把要挪的贴纸暂时转成桌面坐标，浮到最上层（本子层有自己的变换，浮不出来）
-function lift() {
-  const p = project(state), t = p.boardT;
-  const items = drag.uids.map(u => { const sp = itemStagePos(findItem(p, u), t); return { uid: u, x: sp.x, y: sp.y, on: 'desk' }; });
-  apply(state, { type: 'moveMany', items });
-  drag.lifted = true;
-  renderer.render(state, enabledPacks, view(), sel);
-  for (const u of drag.uids) renderer.node(u)?.classList.add('dragging');
+function startPeel(hit, pt) {
+  snapshot();
+  const src = { uid: hit.uid ?? null, ref: hit.ref, c: hit.c, rot: hit.rot, el: hit.el, grab: hit.local };
+  const handle = peeler && hit.sil
+    ? peeler.begin({ key: resolveRef(hit.ref).entry.sha256, img: hit.el, w: hit.w, h: hit.h, smooth: hit.smooth, c: hit.c, rot: hit.rot, grab: hit.local, sil: hit.sil })
+    : null;
   mini.hidden = true;
+  if (!handle) { pickUp(src, pt, null); return; }
+  hit.el.style.visibility = 'hidden';
+  drag = { kind: 'peel', src, handle, start: pt };
 }
 
-// 松手：落在贴纸册上就收回；落在本子上就贴在本子上（转局部坐标）；否则贴在桌面
+// 整张离开：放进状态（桌面坐标、最上层），之后跟着手走。
+// 捏住的那一点（src.grab）始终在指尖下面，所以贴纸中心 = 指尖 − 捏点相对中心的偏移（带上贴纸的旋转）
+function pickUp(src, pt, handle) {
+  const off = unrotate(src.grab.x, src.grab.y, -src.rot);
+  const c = { x: pt.x - off.x, y: pt.y - off.y };
+  let uid = src.uid;
+  if (uid == null) {
+    uid = apply(state, { type: 'place', ref: src.ref, x: c.x, y: c.y, rot: src.rot, on: 'desk' });
+    src.el.style.visibility = '';   // 贴纸页上那一格交给 used 样式：露出底纸上的空位
+  } else {
+    apply(state, { type: 'move', uid, x: c.x, y: c.y, on: 'desk' });
+    apply(state, { type: 'front', uid });
+  }
+  select({ kind: 'item', uid });
+  paint();
+  const el = renderer.node(uid);
+  drag = { kind: 'hold', uid, dx: -off.x, dy: -off.y, handle, unrolling: !!handle };
+  if (!handle) { el?.classList.add('dragging'); return; }
+  // 卷边在 WebGL 里展平、抬起来并滑到指尖下，播完再换成普通图片接着跟手
+  if (el) el.style.visibility = 'hidden';
+  handle.detach(c.x, c.y).then(() => {
+    if (el) el.style.visibility = '';
+    if (drag?.kind === 'hold' && drag.uid === uid) { drag.unrolling = false; el?.classList.add('dragging'); }
+  });
+}
+
+// 松手：落在贴纸页上就放回去；落在本子上就贴在本子上（转局部坐标）；否则贴在桌面
 function settle(d, e) {
-  const p = project(state), t = p.boardT;
-  for (const u of d.uids) renderer.node(u)?.classList.remove('dragging');
-  if (overPanel(e)) {
-    apply(state, { type: 'remove', uids: d.uids });
-    tidyGroups();
+  const p = project(state), el = renderer.node(d.uid);
+  el?.classList.remove('dragging');
+  if (sheet.contains(toStage(e))) {
+    apply(state, { type: 'remove', uids: [d.uid] });
     select(null);
     return;
   }
-  const onBoard = overBoard(e);
-  const items = d.uids.map(u => {
-    const it = findItem(p, u);
-    const pos = onBoard ? stageToLocal(it, t) : it;
-    return { uid: u, x: pos.x, y: pos.y, on: onBoard ? 'board' : 'desk' };
-  });
-  apply(state, { type: 'moveMany', items });
-  mergeGroups(d.uids, onBoard ? 'board' : 'desk');
-  for (const u of d.uids) {
-    const el = renderer.node(u);
-    el?.classList.add('stick');
-    setTimeout(() => el?.classList.remove('stick'), 300);
-  }
+  const onBoard = overBoard(e), it = findItem(p, d.uid);
+  const pos = onBoard ? stageToLocal(it, p.boardT) : it;
+  apply(state, { type: 'move', uid: d.uid, x: pos.x, y: pos.y, on: onBoard ? 'board' : 'desk' });   // 就贴在松手的地方，不做落下动画
 }
 
-// 落点和别的贴纸重叠 → 吸在一起（合并成一组）
-function rectOverlap(a, b) {
-  const k = 0.2;   // 各缩进两成，擦边不算
-  const ax = a.width * k, ay = a.height * k, bx = b.width * k, by = b.height * k;
-  return a.left + ax < b.right - bx && a.right - ax > b.left + bx && a.top + ay < b.bottom - by && a.bottom - ay > b.top + by;
+// 没揭下来就松手：弹回贴平，状态没变，撤销记录也不留
+function springBack(d) {
+  history.pop();
+  d.handle.release().then(() => { d.src.el.style.visibility = ''; });
 }
-function mergeGroups(uids, surface) {
-  const p = project(state);
-  const set = new Set(uids);
-  const rects = uids.map(u => renderer.node(u)?.getBoundingClientRect()).filter(Boolean);
-  const hits = p.items.filter(it => {
-    if (set.has(it.uid) || it.on !== surface) return false;
-    const r = renderer.node(it.uid)?.getBoundingClientRect();
-    return r && rects.some(a => rectOverlap(a, r));
-  });
-  if (!hits.length) return;
-  const all = [...uids, ...hits.map(i => i.uid)];
-  const gids = new Set(all.map(u => findItem(p, u).group).filter(g => g != null));
-  const members = new Set(all);
-  for (const it of p.items) if (gids.has(it.group)) members.add(it.uid);
-  apply(state, { type: 'group', uids: [...members], group: p.seq++ });
-  showToast(`吸在一起了（${members.size} 张）· 长按可撕开`);
-}
-
-// 从贴纸册撕下：按下的瞬间贴纸就已经在画布上了，跟着手指走，松手即贴好
-sheet.addEventListener('pointerdown', e => {
-  const th = e.target.closest('.thumb');
-  if (!th || th.classList.contains('used')) return;
-  e.preventDefault();
-  const ref = th.dataset.ref;
-  if (!resolveRef(ref)) return;
-  const pt = toStage(e);
-  snapshot();
-  const uid = apply(state, { type: 'place', ref, x: pt.x, y: pt.y, rot: +(Math.random() * 14 - 7).toFixed(1), on: 'desk' });
-  th.classList.add('peeling');
-  setTimeout(() => th.classList.remove('peeling'), 400);
-  startItemDrag(e, uid, true);
-});
-
-function bindItem(el, uid) {
-  el.addEventListener('pointerdown', e => {
-    if (e.button !== 0) return;
-    e.preventDefault();
-    e.stopPropagation();
-    snapshot();
-    startItemDrag(e, uid, false);
-  });
-  el.addEventListener('wheel', e => {
-    e.preventDefault();
-    const it = findItem(project(state), uid);
-    if (!it) return;
-    const d = e.deltaY || e.deltaX;
-    const patch = e.shiftKey ? { s: it.s + (d < 0 ? 0.1 : -0.1) } : { rot: it.rot + (d < 0 ? -5 : 5) };
-    commit({ type: 'transform', uid, ...patch }, { coalesce: true });
-    render();
-  }, { passive: false });
-  el.addEventListener('dblclick', () => returnToSheet([uid]));
-}
-function returnToSheet(uids) {
-  for (const u of uids) renderer.node(u)?.classList.add('peel');
-  setTimeout(() => {
-    commit({ type: 'remove', uids });
-    tidyGroups();
-    if (sel?.kind === 'item' && uids.includes(sel.uid)) select(null);
-    render();
-  }, 220);
-}
-
-// 本子：点选、拖动、滚轮缩放
-boardEl.addEventListener('pointerdown', e => {
-  if (e.button !== 0) return;
-  e.preventDefault();
-  e.stopPropagation();
-  const t = project(state).boardT, pt = toStage(e);
-  snapshot();
-  drag = { kind: 'board', dx: t.x - pt.x, dy: t.y - pt.y, moved: false };
-  select({ kind: 'board' });
-  render();
-});
-boardEl.addEventListener('wheel', e => {
-  e.preventDefault();
-  const t = project(state).boardT;
-  const d = e.deltaY || e.deltaX;
-  commit({ type: 'boardSet', s: t.s + (d < 0 ? 0.05 : -0.05) }, { coalesce: true });
-  render();
-}, { passive: false });
-
-// 点空白桌面：取消选中
-stage.addEventListener('pointerdown', e => {
-  if (e.target === stage || e.target === layer) { select(null); render(); }
-});
 
 addEventListener('pointermove', e => {
-  if (!drag) return;
+  if (!drag) {
+    if (modal.hidden && stage.contains(e.target)) stage.style.cursor = cursorFor(hitTest(e));
+    return;
+  }
   const pt = toStage(e);
-  if (drag.kind === 'item') {
-    if (!drag.moved) {
-      if (dist(pt, drag.start) < DRAG_THRESHOLD) return;
-      drag.moved = true;
-      clearTimeout(drag.timer);
-      if (!drag.lifted) lift();
-    }
-    const p = project(state);
-    const items = drag.uids.map(u => { const o = drag.offsets.get(u); return { uid: u, x: pt.x + o.dx, y: pt.y + o.dy }; });
-    apply(state, { type: 'moveMany', items });
-    for (const u of drag.uids) { const el = renderer.node(u), it = findItem(p, u); if (el && it) renderer.placeStyle(el, it, p.boardT); }
-  } else if (drag.kind === 'board') {
-    drag.moved = true;
-    apply(state, { type: 'boardSet', x: pt.x + drag.dx, y: pt.y + drag.dy });
-    renderer.render(state, enabledPacks, view(), sel);
+  if (drag.kind === 'peel') {
+    const { src, handle, start } = drag;
+    const d = unrotate(pt.x - start.x, pt.y - start.y, src.rot);
+    if (handle.update(d.x, d.y) >= DETACH_AT) pickUp(src, pt, handle);
+  } else if (drag.kind === 'hold') {
+    const x = pt.x + drag.dx, y = pt.y + drag.dy;
+    apply(state, { type: 'move', uid: drag.uid, x, y });
+    const el = renderer.node(drag.uid), it = findItem(project(state), drag.uid);
+    if (el && it) renderer.placeStyle(el, it);
+    if (drag.unrolling) drag.handle.moveTo(x, y);
+  } else {
+    apply(state, { type: drag.kind === 'board' ? 'boardMove' : 'sheetMove', x: pt.x + drag.dx, y: pt.y + drag.dy });
+    if (drag.kind === 'sheet') clampSheet();
+    paint();
     mini.hidden = true;
   }
 });
@@ -332,65 +313,76 @@ addEventListener('pointerup', e => {
   if (!drag) return;
   const d = drag;
   drag = null;
-  if (d.kind === 'item') {
-    clearTimeout(d.timer);
-    if (d.moved || d.fresh) settle(d, e);
+  stage.style.cursor = '';
+  if (d.kind === 'peel') return springBack(d);
+  if (d.kind === 'hold') {
+    if (d.unrolling) peeler.flush();   // 还在展平就松手了：立刻交接给普通图片，别等动画
+    settle(d, e);
   }
   save();
   render();
 });
 addEventListener('pointercancel', () => {
-  if (drag?.kind === 'item') { clearTimeout(drag.timer); if (drag.fresh) apply(state, { type: 'remove', uids: drag.uids }); }
+  if (drag?.kind === 'peel') springBack(drag);
+  else if (drag?.kind === 'hold') renderer.node(drag.uid)?.classList.remove('dragging');
   drag = null;
+  save();
   render();
 });
 
-// ---------- 选中后的小工具条 ----------
+// 滚轮转贴纸；双击放回贴纸页
+stage.addEventListener('wheel', e => {
+  const hit = hitTest(e);
+  if (hit?.kind !== 'item') return;
+  e.preventDefault();
+  const it = findItem(project(state), hit.uid), d = e.deltaY || e.deltaX;
+  commit({ type: 'rotate', uid: it.uid, rot: it.rot + (d < 0 ? -5 : 5) }, { coalesce: true });
+  render();
+}, { passive: false });
+stage.addEventListener('dblclick', e => { const hit = hitTest(e); if (hit?.kind === 'item') returnToSheet([hit.uid]); });
+
+function returnToSheet(uids) {
+  for (const u of uids) renderer.node(u)?.classList.add('peel');
+  setTimeout(() => {
+    commit({ type: 'remove', uids });
+    if (sel?.kind === 'item' && uids.includes(sel.uid)) select(null);
+    render();
+  }, 220);
+}
+
+// 换一张纸（装了多个包时，每个包一张）
+function turnPage(dir) {
+  const p = project(state), n = sheet.count();
+  const page = Math.max(0, Math.min(n - 1, p.sheetT.page + dir));
+  if (page === p.sheetT.page) return;
+  apply(state, { type: 'sheetPage', page });
+  save();
+  render();
+}
+$('#sheet-prev').onclick = () => turnPage(-1);
+$('#sheet-next').onclick = () => turnPage(1);
+
+// ---------- 选中贴纸后的小工具条 ----------
 function placeMini() {
-  if (!sel || drag || !state.settings) { mini.hidden = true; return; }
-  const el = sel.kind === 'board' ? boardEl : renderer.node(sel.uid);
-  if (!el || boardWrap.hidden && sel.kind === 'board') { mini.hidden = true; return; }
+  const el = sel?.kind === 'item' && !drag ? renderer.node(sel.uid) : null;
+  if (!el) { mini.hidden = true; return; }
   const r = el.getBoundingClientRect(), sr = stage.getBoundingClientRect();
   mini.hidden = false;
-  mini.dataset.kind = sel.kind;
   mini.style.left = ((r.left + r.width / 2 - sr.left) / scale) + 'px';
   mini.style.top = ((r.bottom - sr.top) / scale + 12) + 'px';
 }
 mini.addEventListener('pointerdown', e => e.stopPropagation());
 function selItem() { return sel?.kind === 'item' ? findItem(project(state), sel.uid) : null; }
-function flipSel() {
-  if (sel?.kind === 'board') commit({ type: 'boardSet', flip: !project(state).boardT.flip });
-  else if (selItem()) commit({ type: 'transform', uid: sel.uid, flip: !selItem().flip });
-  render();
-}
-function zoomSel(dir) {
-  if (sel?.kind === 'board') commit({ type: 'boardSet', s: project(state).boardT.s + dir * 0.1 });
-  else if (selItem()) commit({ type: 'transform', uid: sel.uid, s: selItem().s + dir * 0.25 });   // 四分之一档，像素更整齐
-  render();
-}
-$('#mini-flip').onclick = flipSel;
-$('#mini-in').onclick = () => zoomSel(1);
-$('#mini-out').onclick = () => zoomSel(-1);
 $('#mini-back').onclick = () => { if (selItem()) returnToSheet([sel.uid]); };
 
 addEventListener('keydown', e => {
   if (e.target.tagName === 'INPUT') return;
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); undo(); return; }
   if (e.key === 'Escape') { if (!modal.hidden) modal.hidden = true; else { select(null); render(); } return; }
-  if (!sel) return;
-  if (e.key === 'Delete' || e.key === 'Backspace') { if (selItem()) returnToSheet([sel.uid]); }
-  else if (e.key.toLowerCase() === 'f') flipSel();
-  else if (e.key === '+' || e.key === '=') zoomSel(1);
-  else if (e.key === '-') zoomSel(-1);
-});
-
-// ---------- 贴纸册折叠 ----------
-function syncPanel() {
-  panel.classList.toggle('collapsed', !state.settings.panelOpen);
-}
-$('#btn-fold').onclick = e => { e.stopPropagation(); apply(state, { type: 'setSetting', patch: { panelOpen: !state.settings.panelOpen } }); save(); render(); };
-panel.addEventListener('pointerdown', () => {
-  if (!state.settings.panelOpen) { apply(state, { type: 'setSetting', patch: { panelOpen: true } }); save(); render(); }
+  if (!modal.hidden) return;
+  if (e.key === 'ArrowLeft') return turnPage(-1);
+  if (e.key === 'ArrowRight') return turnPage(1);
+  if ((e.key === 'Delete' || e.key === 'Backspace') && selItem()) returnToSheet([sel.uid]);
 });
 
 // ---------- 音乐 ----------
@@ -434,7 +426,7 @@ $('#btn-undo').onclick = undo;
 $('#btn-clear').onclick = () => {
   if (!project(state).items.length) return;
   commit({ type: 'clear' }); select(null); render();
-  showToast('全部撕回贴纸册啦（Ctrl+Z 可反悔）');
+  showToast('全部放回贴纸页啦（Ctrl+Z 可反悔）');
 };
 
 // ---------- 设置页 ----------
@@ -482,8 +474,10 @@ async function installDefault() {
 async function refresh() {
   await reloadPacks();
   fillDefaults();
-  save();
   await render();
+  clampSheet();
+  paint();
+  save();
   if (!modal.hidden) renderPackList();
 }
 
@@ -602,6 +596,8 @@ await reloadPacks();
 if (!installed.length) {
   await installDefault();
 } else {
-  hideLoading();
-  await refresh();
+  // 旧版安装器装的包：清单里后来加的字段（比如贴纸纸排版）没存下来，悄悄重装一次；文件没变的不会重下
+  const stale = installed.filter(p => p.installer !== Packs.INSTALLER);
+  for (const p of stale) await install(p.source);
+  if (!stale.length) { hideLoading(); await refresh(); }
 }

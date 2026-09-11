@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>花漾贴贴 Petal Pop</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DotGothic16&display=swap" rel="stylesheet">
+<link href="https://cdnjs.cloudflare.com/ajax/libs/remixicon/4.2.0/remixicon.min.css" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div id="stage">
+  <!-- 底板（本子）：wrap 承载位置，贴在本子上的贴纸放在 boardLayer 里跟着一起挪 -->
+  <div id="boardWrap" hidden>
+    <img id="board" alt="board" draggable="false">
+    <div id="boardLayer"></div>
+  </div>
+
+  <!-- 贴纸纸：桌上的一张印刷贴纸纸，一个素材包一张；拖空白处挪，装了多个包时底下换纸 -->
+  <div id="sheetObj" hidden>
+    <div class="sheet-paper">
+      <div id="sheetSlots"></div>
+      <div class="sheet-foot">
+        <button id="sheet-prev" class="sheet-btn" title="上一张纸 (←)"><i class="ri-arrow-left-s-fill"></i></button>
+        <span id="sheetTitle"></span>
+        <span id="sheetPage" class="dim"></span>
+        <button id="sheet-next" class="sheet-btn" title="下一张纸 (→)"><i class="ri-arrow-right-s-fill"></i></button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 贴在桌面上的贴纸层 -->
+  <div id="layer"></div>
+
+  <!-- 撕贴纸的 WebGL 层：只画正在撕的那一张 -->
+  <canvas id="peel"></canvas>
+
+  <!-- 工具条 -->
+  <div id="toolbar">
+    <button id="btn-bgm" class="px-btn" title="音乐开关"><i class="ri-music-2-line"></i><span>音乐</span></button>
+    <button id="btn-board" class="px-btn" title="换一块底板"><i class="ri-book-2-line"></i><span>换本子</span></button>
+    <button id="btn-bg" class="px-btn" title="换桌面"><i class="ri-landscape-line"></i><span>换桌面</span></button>
+    <button id="btn-undo" class="px-btn" title="撤销 (Ctrl+Z)"><i class="ri-arrow-go-back-line"></i><span>撤销</span></button>
+    <button id="btn-clear" class="px-btn" title="全部撕掉"><i class="ri-eraser-line"></i><span>清空</span></button>
+    <button id="btn-settings" class="px-btn" title="设置"><i class="ri-settings-3-line"></i><span>设置</span></button>
+  </div>
+
+  <!-- 选中贴纸后出现的小工具条 -->
+  <div id="mini" class="px-box" hidden>
+    <button id="mini-back" class="px-btn sm" title="放回贴纸页 (Delete)"><i class="ri-scissors-line"></i></button>
+  </div>
+
+  <div id="toast" class="px-box"></div>
+</div>
+
+<!-- 设置 -->
+<div id="modal" class="modal" hidden>
+  <div class="px-box modal-card">
+    <div class="modal-head">
+      <span>设置</span>
+      <button id="btn-close" class="px-btn sm" title="关闭"><i class="ri-close-line"></i></button>
+    </div>
+    <div class="tabs">
+      <button class="tab on" data-tab="packs"><i class="ri-archive-2-line"></i>素材包</button>
+      <button class="tab" data-tab="save"><i class="ri-save-3-line"></i>存档</button>
+      <button class="tab" data-tab="storage"><i class="ri-hard-drive-2-line"></i>存储</button>
+      <button class="tab" data-tab="audio"><i class="ri-music-2-line"></i>音乐</button>
+    </div>
+
+    <section data-pane="packs">
+      <div id="pack-list"></div>
+      <div class="add-row">
+        <input id="pack-input" placeholder="用户名/仓库名@标签  或  local:packs/xxx" spellcheck="false">
+        <button id="btn-add" class="px-btn"><i class="ri-add-line"></i>安装</button>
+      </div>
+      <div class="row-end">
+        <button id="btn-default" class="px-btn sm" title="重装 / 更新默认包"><i class="ri-home-4-line"></i>默认包</button>
+      </div>
+      <div class="dim modal-help">包格式说明见 docs/08-pack-format.md。只装你信得过的仓库；包里只会加载图片和音频，永远不会执行脚本。</div>
+    </section>
+
+    <section data-pane="save" hidden>
+      <p>存档里只有贴纸的位置和引用，不含图片。换电脑时导出这份文件，装上同样的素材包再导入即可复原。</p>
+      <div class="btn-row">
+        <button id="btn-export" class="px-btn"><i class="ri-download-2-line"></i>导出存档</button>
+        <button id="btn-import" class="px-btn"><i class="ri-upload-2-line"></i>导入存档</button>
+        <input id="import-file" type="file" accept="application/json,.json" hidden>
+      </div>
+    </section>
+
+    <section data-pane="storage" hidden>
+      <p id="storage-info" class="storage-info">…</p>
+      <div class="btn-row">
+        <button id="btn-gc" class="px-btn sm" title="删掉没有任何包引用的文件"><i class="ri-brush-2-line"></i>清理无引用文件</button>
+        <button id="btn-wipe" class="px-btn sm danger" title="删除本站点所有本地数据"><i class="ri-delete-bin-2-line"></i>清空全部本地数据</button>
+      </div>
+      <div class="dim modal-help">素材按内容去重存在浏览器的 IndexedDB 里。卸载素材包后点“清理”可释放空间。</div>
+    </section>
+
+    <section data-pane="audio" hidden>
+      <label class="slider-row">音量 <input id="volume" type="range" min="0" max="100"></label>
+    </section>
+  </div>
+</div>
+
+<!-- 加载 / 安装遮罩 -->
+<div id="loading">
+  <div class="px-box load-card">
+    <div class="load-title">花漾贴贴</div>
+    <div class="load-sub" id="load-text">启动中…</div>
+    <div class="bar-wrap"><div id="bar"></div></div>
+  </div>
+</div>
+
+<audio id="bgm" loop preload="none"></audio>
+
+<script type="module" src="js/app.js"></script>
+</body>
+</html>
