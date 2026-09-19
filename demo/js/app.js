@@ -242,6 +242,13 @@ const cursorFor = hit => !hit ? '' : hit.kind === 'board' ? 'move' : hit.edge ? 
 // drag = { kind:'board', dx, dy, snapped }              挪本子
 let drag = null;
 let hintAt = 0;
+// 双击贴纸 = 收回贴纸条。自己判，不用原生 dblclick：
+// tapCand 是这一下按在谁身上（拉动超过 4px 就作废，那是在撕），松手时变成 lastTap；
+// 下一次按在同一张上、间隔 ≤350ms、位置差 ≤4px 就算双击
+const TAP_MS = 350, TAP_PX = 4;
+let tapCand = null, lastTap = null;
+const isDoubleTap = (uid, e) => !!lastTap && lastTap.uid === uid
+  && Date.now() - lastTap.t <= TAP_MS && Math.hypot(e.clientX - lastTap.x, e.clientY - lastTap.y) <= TAP_PX;
 
 function hintEdge() {   // 按在贴纸中间：真贴纸抠不起来，提示一下
   if (Date.now() - hintAt > 4000) { hintAt = Date.now(); showToast('从贴纸边缘撕起来'); }
@@ -260,6 +267,16 @@ viewport.addEventListener('pointerdown', e => {
     render();
     return;
   }
+  // 双击一张贴出去的贴纸（桌面上的、本子上的都算）：收回贴纸条
+  if (isDoubleTap(hit.uid, e)) {
+    lastTap = tapCand = null;
+    snapshot();
+    apply(state, { type: 'remove', uids: [hit.uid] });
+    save(); select(null); render();
+    showToast('收回贴纸条（Ctrl+Z 可反悔）');
+    return;
+  }
+  tapCand = { uid: hit.uid, x: e.clientX, y: e.clientY };
   if (!hit.edge) { hintEdge(); render(); return; }
   viewport.style.cursor = 'grabbing';
   startPeel(hit, e);
@@ -429,6 +446,7 @@ addEventListener('pointermove', e => {
   if (drag.kind === 'peel') {
     const { src, handle, start } = drag;
     const d = unrotate(e.clientX - start.x, e.clientY - start.y, src.rot);   // 屏幕像素
+    if (Math.hypot(d.x, d.y) > TAP_PX) tapCand = null;   // 拉动过了，这一下是撕不是点
     if (handle.update(d.x, d.y) >= DETACH_AT) { snapshot(); pickUp(src, e, handle); }
   } else if (drag.kind === 'hold') {
     if (hand) { hand.x = e.clientX; hand.y = e.clientY; paintHand(performance.now()); }
@@ -439,6 +457,7 @@ addEventListener('pointermove', e => {
   }
 });
 addEventListener('pointerup', e => {
+  if (tapCand) { lastTap = { ...tapCand, t: Date.now() }; tapCand = null; }   // 没拉动就松手：记下来，可能是双击的第一下
   if (!drag) { if (hand) { dropHand(); render(); } return; }   // 兜底：拖动状态丢了也别把贴纸落在"手"里
   const d = drag;
   drag = null;
