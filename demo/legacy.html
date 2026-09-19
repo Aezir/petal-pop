@@ -18,7 +18,23 @@
       <span class="side-title">素材包</span>
       <button id="btn-side-toggle" class="px-btn sm" title="收起 / 展开"><i class="ri-side-bar-line"></i></button>
     </div>
-    <div id="side-body"><p class="dim side-placeholder">图包管理面板（下一步）</p></div>
+    <div id="side-body">
+      <!-- 分类：按包的内容推导——有贴纸的算「贴纸」，只有本子/桌面/音乐/皮肤的算「美化」 -->
+      <div id="pack-chips" class="chips">
+        <button class="chip on" data-cat="all">全部<i></i></button>
+        <button class="chip" data-cat="sticker" style="--tone:var(--t3)">贴纸<i></i></button>
+        <button class="chip" data-cat="deco" style="--tone:var(--t2)">美化<i></i></button>
+      </div>
+      <div class="add-row">
+        <input id="pack-input" placeholder="用户名/仓库名@标签  或  local:packs/xxx" spellcheck="false">
+        <button id="btn-add" class="btn primary" title="从 GitHub 或本地目录安装"><i class="ri-add-line"></i></button>
+      </div>
+      <div id="pack-list"></div>
+      <div class="side-foot">
+        <button id="btn-default" class="btn" title="重装 / 更新默认包"><i class="ri-home-4-line"></i>默认包</button>
+        <span class="dim side-help">只装你信得过的仓库；包里只会加载图片、音频和皮肤配置，永远不会执行脚本。</span>
+      </div>
+    </div>
   </aside>
 
   <main id="center">
@@ -66,26 +82,13 @@
       <button id="btn-close" class="px-btn sm" title="关闭"><i class="ri-close-line"></i></button>
     </div>
     <div class="tabs">
-      <button class="tab on" data-tab="packs"><i class="ri-archive-2-line"></i>素材包</button>
-      <button class="tab" data-tab="skins"><i class="ri-palette-line"></i>皮肤</button>
+      <button class="tab on" data-tab="skins"><i class="ri-palette-line"></i>皮肤</button>
       <button class="tab" data-tab="save"><i class="ri-save-3-line"></i>存档</button>
       <button class="tab" data-tab="storage"><i class="ri-hard-drive-2-line"></i>存储</button>
       <button class="tab" data-tab="audio"><i class="ri-music-2-line"></i>音乐</button>
     </div>
 
-    <section data-pane="packs">
-      <div id="pack-list"></div>
-      <div class="add-row">
-        <input id="pack-input" placeholder="用户名/仓库名@标签  或  local:packs/xxx" spellcheck="false">
-        <button id="btn-add" class="px-btn"><i class="ri-add-line"></i>安装</button>
-      </div>
-      <div class="row-end">
-        <button id="btn-default" class="px-btn sm" title="重装 / 更新默认包"><i class="ri-home-4-line"></i>默认包</button>
-      </div>
-      <div class="dim modal-help">包格式说明见 docs/08-pack-format.md。只装你信得过的仓库；包里只会加载图片、音频和皮肤配置，永远不会执行脚本。</div>
-    </section>
-
-    <section data-pane="skins" hidden>
+    <section data-pane="skins">
       <div id="skin-list"></div>
       <div class="dim modal-help">皮肤来自素材包里的 skin 条目，只改颜色和纹理；不加载远程字体、不执行脚本。禁用或卸载皮肤所在的包会回到默认主题，装回来自动恢复。</div>
     </section>

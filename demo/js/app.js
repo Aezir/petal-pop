@@ -69,12 +69,17 @@ let installed = [];          // 已安装（DB 里的记录）
 let enabledPacks = [];       // 启用中，按 order 排
 const refIndex = new Map();  // 'pack:id' → { pack, entry }
 
+// 包的分类按内容推导：有贴纸的算「贴纸」，只有本子/桌面/音乐/皮肤的算「美化」
+const catOf = p => (p.entries.some(e => e.type === 'sticker') ? 'sticker' : 'deco');
+// 排序：置顶的在前，然后按 order；这个顺序同时决定左栏列表、右栏贴纸条、换本子/桌面/皮肤的循环顺序
+const packCmp = (a, b) => {
+  const ma = state.packs[a.id] || {}, mb = state.packs[b.id] || {};
+  return (+!!mb.pinned - +!!ma.pinned) || ((ma.order || 0) - (mb.order || 0)) || Packs.displayName(a.name).localeCompare(Packs.displayName(b.name));
+};
 async function reloadPacks() {
   installed = await Packs.listPacks();
   for (const p of installed) if (!state.packs[p.id]) apply(state, { type: 'setPack', id: p.id, patch: {} });
-  enabledPacks = installed
-    .filter(p => state.packs[p.id]?.enabled !== false)
-    .sort((a, b) => (state.packs[a.id].order || 0) - (state.packs[b.id].order || 0));
+  enabledPacks = installed.filter(p => state.packs[p.id]?.enabled !== false).sort(packCmp);
   refIndex.clear();
   for (const p of enabledPacks) for (const e of p.entries) refIndex.set(p.id + ':' + e.id, { pack: p, entry: e });
 }
@@ -482,12 +487,11 @@ const tabs = modal.querySelectorAll('.tab');
 function showTab(name) {
   tabs.forEach(t => t.classList.toggle('on', t.dataset.tab === name));
   modal.querySelectorAll('[data-pane]').forEach(s => { s.hidden = s.dataset.pane !== name; });
-  if (name === 'packs') renderPackList();
   if (name === 'skins') renderSkinList();
   if (name === 'storage') renderStorage();
 }
 tabs.forEach(t => { t.onclick = () => showTab(t.dataset.tab); });
-$('#btn-settings').onclick = () => { modal.hidden = false; showTab('packs'); };
+$('#btn-settings').onclick = () => { modal.hidden = false; showTab('skins'); };
 $('#btn-close').onclick = () => { modal.hidden = true; };
 modal.addEventListener('click', e => { if (e.target === modal) modal.hidden = true; });
 
@@ -526,43 +530,71 @@ async function refresh() {
   await syncSkin();
   await render();
   save();
-  if (!modal.hidden) { renderPackList(); renderSkinList(); }
+  renderPackList();
+  if (!modal.hidden) renderSkinList();
 }
 
 const fmtMB = b => (b / 1048576).toFixed(1) + ' MB';
-async function renderPackList() {
+// 左栏图包列表：分类 chip 过滤，置顶在前；每行 启用 / 名称 / 元信息 / 上移 下移 置顶 收藏 更新 卸载
+let packCat = 'all';
+$('#pack-chips').onclick = e => { const c = e.target.closest('.chip'); if (!c) return; packCat = c.dataset.cat; renderPackList(); };
+function renderPackList() {
+  const sorted = [...installed].sort(packCmp);
+  const counts = { all: sorted.length, sticker: 0, deco: 0 };
+  for (const p of sorted) counts[catOf(p)]++;
+  for (const c of $('#pack-chips').querySelectorAll('.chip')) {
+    c.classList.toggle('on', c.dataset.cat === packCat);
+    c.querySelector('i').textContent = counts[c.dataset.cat] || '';
+  }
+  const shown = sorted.filter(p => packCat === 'all' || catOf(p) === packCat);
   packList.innerHTML = '';
-  if (!installed.length) packList.innerHTML = '<div class="dim">还没有素材包</div>';
-  for (const p of installed) {
-    const on = state.packs[p.id]?.enabled !== false;
+  if (!shown.length) { packList.innerHTML = `<div class="dim side-help">${installed.length ? '这个分类下没有包' : '还没有素材包'}</div>`; return; }
+  for (const p of shown) {
+    const meta = state.packs[p.id] || {}, on = meta.enabled !== false;
     const row = document.createElement('div');
-    row.className = 'pack-row' + (on ? '' : ' off');
-    const counts = {};
-    for (const e of p.entries) counts[e.type] = (counts[e.type] || 0) + 1;
+    row.className = 'pack-row' + (on ? '' : ' off') + (meta.pinned ? ' pinned' : '');
+    const n = {};
+    for (const e of p.entries) n[e.type] = (n[e.type] || 0) + 1;
     row.innerHTML = `
-      <label class="pack-main">
-        <input type="checkbox" ${on ? 'checked' : ''}>
+      <div class="pack-main">
+        <input type="checkbox" title="启用 / 停用" ${on ? 'checked' : ''}>
         <span class="pack-name"></span>
-        <span class="dim pack-meta"></span>
-      </label>
+      </div>
+      <div class="pack-meta"></div>
       <div class="pack-actions">
-        <button class="px-btn sm act-update" title="检查这个来源有没有新版本"><i class="ri-download-cloud-2-line"></i>更新</button>
-        <button class="px-btn sm act-remove" title="卸载"><i class="ri-delete-bin-line"></i></button>
+        <button class="btn icon act-up" title="上移"><i class="ri-arrow-up-s-line"></i></button>
+        <button class="btn icon act-down" title="下移"><i class="ri-arrow-down-s-line"></i></button>
+        <button class="btn icon act-pin${meta.pinned ? ' lit' : ''}" title="${meta.pinned ? '取消置顶' : '置顶'}"><i class="${meta.pinned ? 'ri-pushpin-fill' : 'ri-pushpin-line'}"></i></button>
+        <button class="btn icon act-fav${meta.fav ? ' lit' : ''}" title="${meta.fav ? '取消收藏' : '收藏'}"><i class="${meta.fav ? 'ri-star-fill' : 'ri-star-line'}"></i></button>
+        <button class="btn icon act-update" title="检查这个来源有没有新版本"><i class="ri-download-cloud-2-line"></i></button>
+        <button class="btn icon danger act-remove" title="卸载"><i class="ri-delete-bin-line"></i></button>
       </div>`;
-    row.querySelector('.pack-name').textContent = `${Packs.displayName(p.name)}  v${p.version}`;
+    const name = row.querySelector('.pack-name');
+    name.textContent = `${Packs.displayName(p.name)}  v${p.version}`;
+    name.title = p.label;
     row.querySelector('.pack-meta').textContent =
-      `${p.label} · 贴纸 ${counts.sticker || 0} · 底板 ${counts.board || 0} · 桌面 ${counts.background || 0} · 音乐 ${counts.bgm || 0}` +
-      `${counts.skin ? ` · 皮肤 ${counts.skin}` : ''} · ${fmtMB(p.bytes)} · ${p.license || '未注明许可'}`;
+      `贴纸 ${n.sticker || 0} · 本子 ${n.board || 0} · 桌面 ${n.background || 0} · 音乐 ${n.bgm || 0}${n.skin ? ` · 皮肤 ${n.skin}` : ''} · ${fmtMB(p.bytes)} · ${p.license || '未注明许可'}`;
     if (p.skipped?.length) {   // 装的时候不认识的条目：说清楚跳过了什么，升级游戏后点「更新」补装
       const sk = document.createElement('div');
       sk.className = 'pack-skipped';
       sk.textContent = `跳过了 ${p.skipped.length} 个游戏还不认识的条目（${p.skipped.map(e => `${e.id}:${e.type}`).join('、')}），升级游戏后点「更新」补装`;
-      row.querySelector('.pack-main').appendChild(sk);
+      row.querySelector('.pack-meta').after(sk);
     }
-    row.querySelector('input').onchange = ev => {
-      apply(state, { type: 'setPack', id: p.id, patch: { enabled: ev.target.checked } });
+    const box = row.querySelector('input');
+    box.onchange = () => { apply(state, { type: 'setPack', id: p.id, patch: { enabled: box.checked } }); refresh(); };
+    name.onclick = () => { box.checked = !box.checked; box.onchange(); };
+    // 上移 / 下移：只和同一置顶组里的邻居换位置（换的是排序后整份列表里的位置，然后按新顺序重编 order）
+    const swap = dir => {
+      const ids = sorted.map(q => q.id), i = ids.indexOf(p.id), j = i + dir;
+      if (j < 0 || j >= ids.length || !!state.packs[ids[j]]?.pinned !== !!meta.pinned) return;
+      [ids[i], ids[j]] = [ids[j], ids[i]];
+      apply(state, { type: 'packOrder', ids });
       refresh();
     };
+    row.querySelector('.act-up').onclick = () => swap(-1);
+    row.querySelector('.act-down').onclick = () => swap(1);
+    row.querySelector('.act-pin').onclick = () => { apply(state, { type: 'setPack', id: p.id, patch: { pinned: !meta.pinned } }); refresh(); };
+    row.querySelector('.act-fav').onclick = () => { apply(state, { type: 'setPack', id: p.id, patch: { fav: !meta.fav } }); save(); renderPackList(); };
     row.querySelector('.act-update').onclick = async ev => {
       ev.target.closest('button').disabled = true;
       try {

@@ -89,7 +89,8 @@ export function normalize(raw) {
   s.settings = { bgm: true, bgmRef: null, volume: 0.5, skinRef: null, ...(s.settings || {}) };
   s.settings.volume = clamp(+s.settings.volume || 0, [0, 1]);
   if (typeof s.settings.skinRef !== 'string') s.settings.skinRef = null;   // null = 默认主题，本身就是合法选择
-  s.packs = (s.packs && typeof s.packs === 'object') ? s.packs : {};
+  s.packs = Object.fromEntries(Object.entries(s.packs && typeof s.packs === 'object' ? s.packs : {})
+    .map(([id, v]) => [id, { enabled: v?.enabled !== false, order: +v?.order || 0, pinned: !!v?.pinned, fav: !!v?.fav }]));
   s.ui = normUi(s.ui);
   return s;
 }
@@ -157,7 +158,10 @@ export function apply(state, a) {
       if (a.ref !== undefined) state.settings.bgmRef = a.ref;
       return;
     case 'setPack':
-      state.packs[a.id] = { enabled: true, order: Date.now(), ...(state.packs[a.id] || {}), ...a.patch };
+      state.packs[a.id] = { enabled: true, order: Date.now(), pinned: false, fav: false, ...(state.packs[a.id] || {}), ...a.patch };
+      return;
+    case 'packOrder':   // { ids }：按给定顺序重编 order（置顶组和普通组各自的相对顺序都在这一个序列里）
+      a.ids.forEach((id, i) => { if (state.packs[id]) state.packs[id].order = i; });
       return;
     case 'forgetPack': delete state.packs[a.id]; return;
     default: throw new Error('未知动作 ' + a.type);
