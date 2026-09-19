@@ -26,20 +26,44 @@
   --sheet-dot-color:rgba(255,255,255,.6);
   --sheet-dot-sm-color:rgba(255,255,255,.35);
   --sheet-dash-color:rgba(255,255,255,.85);
+  /* 外壳令牌（nai-gallery 日间）。旧的像素风令牌先留着给弹窗/贴纸纸用，样式统一那一步再清 */
+  --bg:#f0efeb; --panel:#f0efeb; --panel2:#e5e4dd; --line:transparent;
+  --fg:#292820; --dim:#74736a; --dim2:#9a998e; --accent:#2268ff;
+  --input:#fbfbf9; --danger:#e5484d;
+  --radius:6px; --radius-lg:8px;
+  --ui-font:-apple-system,"Segoe UI","Microsoft YaHei",system-ui,sans-serif;
 }
 *{box-sizing:border-box}
-html,body{margin:0;height:100%;background:var(--page-bg);overflow:hidden;font-family:var(--font);color:var(--ink);user-select:none;-webkit-user-select:none}
+html,body{margin:0;height:100%;background:var(--bg);overflow:hidden;font-family:var(--font);color:var(--ink);user-select:none;-webkit-user-select:none}
 img{image-rendering:pixelated;image-rendering:crisp-edges}
 [hidden]{display:none!important}
 
-/* 舞台：固定 1672×941 逻辑坐标，用 transform 整体缩放适配窗口 */
-#stage{
-  position:absolute;left:50%;top:50%;
+/* ===== 三栏外壳 ===== */
+#app{display:grid;grid-template-columns:var(--side-w,288px) minmax(0,1fr) 300px;height:100vh;font:13.5px/1.6 var(--ui-font);color:var(--fg)}
+#app.side-collapsed{--side-w:44px}
+/* 窄窗口：左栏自动收成窄条、右栏变窄，先保证画布有地方 */
+@media (max-width:1100px){
+  #app{grid-template-columns:44px minmax(0,1fr) 220px}
+  #app .side-title,#app #side-body{display:none}
+  #app .side-head{justify-content:center;padding:8px 4px}
+}
+#side,#strips{background:var(--panel);min-height:0;overflow-y:auto;display:flex;flex-direction:column}
+#side{border-right:1px solid var(--line)}
+#strips{border-left:1px solid var(--line)}
+.side-head{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 8px 8px 12px;font-size:10.5px;text-transform:uppercase;letter-spacing:.12em;color:var(--dim2);font-weight:700}
+#app.side-collapsed .side-title,#app.side-collapsed #side-body{display:none}
+#app.side-collapsed .side-head{justify-content:center;padding:8px 4px}
+.side-placeholder{padding:12px;margin:0}
+#center{display:flex;flex-direction:column;min-width:0;min-height:0;background:var(--bg)}
+#topbar{display:flex;align-items:center;gap:8px;padding:8px 12px;flex-wrap:wrap;background:var(--panel);border-bottom:1px solid var(--line);flex:0 0 auto}
+.zoom-readout{min-width:44px;text-align:right;font-variant-numeric:tabular-nums}
+/* 视口裁切；世界层是固定 1672×941 的逻辑坐标，只靠一个 transform 平移缩放 */
+#viewport{position:relative;flex:1 1 auto;min-height:0;overflow:hidden;touch-action:none;background:var(--bg)}
+#world{
+  position:absolute;left:0;top:0;
   width:1672px;height:941px;
-  transform:translate(-50%,-50%);
-  transform-origin:center center;
+  transform-origin:0 0;
   background:var(--stage-bg) center/cover no-repeat;
-  overflow:hidden;
 }
 
 /* ===== 本子 ===== */
@@ -92,8 +116,6 @@ img{image-rendering:pixelated;image-rendering:crisp-edges}
 .px-btn:disabled{opacity:.5;cursor:default}
 .px-btn.danger:hover{background-color:var(--btn-danger-hover)}
 
-#toolbar{position:absolute;left:24px;top:20px;display:flex;gap:12px;z-index:50}
-
 
 .dim{opacity:.6;font-size:13px}
 
@@ -138,8 +160,8 @@ img{image-rendering:pixelated;image-rendering:crisp-edges}
 .sheet-btn:hover{background-color:var(--btn-hover)}
 .sheet-btn:disabled{opacity:.35;cursor:default}
 
-/* 撕贴纸的 WebGL 层：盖满舞台，不接事件 */
-#peel{position:absolute;left:0;top:0;width:1672px;height:941px;pointer-events:none;z-index:65}
+/* 撕贴纸的 WebGL 层：盖满整个窗口（屏幕像素），在三栏之上、弹窗之下，不接事件 */
+#peel{position:fixed;inset:0;width:100%;height:100%;pointer-events:none;z-index:80}
 
 /* ===== 提示 ===== */
 #toast{

@@ -11,47 +11,64 @@
 </head>
 <body>
 
-<div id="stage">
-  <!-- 底板（本子）：wrap 承载位置，贴在本子上的贴纸放在 boardLayer 里跟着一起挪 -->
-  <div id="boardWrap" hidden>
-    <img id="board" alt="board" draggable="false">
-    <div id="boardLayer"></div>
-  </div>
-
-  <!-- 贴纸纸：桌上的一张印刷贴纸纸，一个素材包一张；拖空白处挪，装了多个包时底下换纸 -->
-  <div id="sheetObj" hidden>
-    <div class="sheet-paper">
-      <div id="sheetSlots"></div>
-      <div class="sheet-foot">
-        <button id="sheet-prev" class="sheet-btn" title="上一张纸 (←)"><i class="ri-arrow-left-s-fill"></i></button>
-        <span id="sheetTitle"></span>
-        <span id="sheetPage" class="dim"></span>
-        <button id="sheet-next" class="sheet-btn" title="下一张纸 (→)"><i class="ri-arrow-right-s-fill"></i></button>
-      </div>
+<!-- 三栏：左 图包管理 / 中 工具行 + 画布视口 / 右 贴纸条 -->
+<div id="app">
+  <aside id="side">
+    <div class="side-head">
+      <span class="side-title">素材包</span>
+      <button id="btn-side-toggle" class="px-btn sm" title="收起 / 展开"><i class="ri-side-bar-line"></i></button>
     </div>
-  </div>
+    <div id="side-body"><p class="dim side-placeholder">图包管理面板（下一步）</p></div>
+  </aside>
 
-  <!-- 贴在桌面上的贴纸层 -->
-  <div id="layer"></div>
+  <main id="center">
+    <div id="topbar">
+      <button id="btn-bgm" class="px-btn" title="音乐开关"><i class="ri-music-2-line"></i><span>音乐</span></button>
+      <button id="btn-board" class="px-btn" title="换一块底板"><i class="ri-book-2-line"></i><span>换本子</span></button>
+      <button id="btn-bg" class="px-btn" title="换桌面"><i class="ri-landscape-line"></i><span>换桌面</span></button>
+      <button id="btn-skin" class="px-btn" title="换一套界面皮肤"><i class="ri-palette-line"></i><span>换皮肤</span></button>
+      <button id="btn-undo" class="px-btn" title="上一步 (Ctrl+Z)"><i class="ri-arrow-go-back-line"></i><span>上一步</span></button>
+      <button id="btn-redo" class="px-btn" title="下一步 (Ctrl+Y)"><i class="ri-arrow-go-forward-line"></i><span>下一步</span></button>
+      <button id="btn-clear" class="px-btn" title="全部撕掉"><i class="ri-eraser-line"></i><span>清空</span></button>
+      <span id="zoom-readout" class="dim zoom-readout" title="画布缩放：滚轮以鼠标为中心缩放，拖空白处平移">100%</span>
+      <button id="btn-fit" class="px-btn" title="整张桌面放进窗口"><i class="ri-fullscreen-line"></i><span>适应窗口</span></button>
+      <button id="btn-settings" class="px-btn" title="设置"><i class="ri-settings-3-line"></i><span>设置</span></button>
+    </div>
 
-  <!-- 撕贴纸的 WebGL 层：只画正在撕的那一张 -->
-  <canvas id="peel"></canvas>
+    <!-- 视口：只有 #world 一个 transform（平移 + 缩放），里面全是 1672×941 的世界坐标 -->
+    <div id="viewport">
+      <div id="world">
+        <!-- 底板（本子）：wrap 承载位置，贴在本子上的贴纸放在 boardLayer 里跟着一起挪 -->
+        <div id="boardWrap" hidden>
+          <img id="board" alt="board" draggable="false">
+          <div id="boardLayer"></div>
+        </div>
 
-  <!-- 工具条 -->
-  <div id="toolbar">
-    <button id="btn-bgm" class="px-btn" title="音乐开关"><i class="ri-music-2-line"></i><span>音乐</span></button>
-    <button id="btn-board" class="px-btn" title="换一块底板"><i class="ri-book-2-line"></i><span>换本子</span></button>
-    <button id="btn-bg" class="px-btn" title="换桌面"><i class="ri-landscape-line"></i><span>换桌面</span></button>
-    <button id="btn-skin" class="px-btn" title="换一套界面皮肤"><i class="ri-palette-line"></i><span>换皮肤</span></button>
-    <button id="btn-undo" class="px-btn" title="上一步 (Ctrl+Z)"><i class="ri-arrow-go-back-line"></i><span>上一步</span></button>
-    <button id="btn-redo" class="px-btn" title="下一步 (Ctrl+Y)"><i class="ri-arrow-go-forward-line"></i><span>下一步</span></button>
-    <button id="btn-clear" class="px-btn" title="全部撕掉"><i class="ri-eraser-line"></i><span>清空</span></button>
-    <button id="btn-settings" class="px-btn" title="设置"><i class="ri-settings-3-line"></i><span>设置</span></button>
-  </div>
+        <!-- 贴纸纸：桌上的一张印刷贴纸纸，一个素材包一张；拖空白处挪，装了多个包时底下换纸 -->
+        <div id="sheetObj" hidden>
+          <div class="sheet-paper">
+            <div id="sheetSlots"></div>
+            <div class="sheet-foot">
+              <button id="sheet-prev" class="sheet-btn" title="上一张纸 (←)"><i class="ri-arrow-left-s-fill"></i></button>
+              <span id="sheetTitle"></span>
+              <span id="sheetPage" class="dim"></span>
+              <button id="sheet-next" class="sheet-btn" title="下一张纸 (→)"><i class="ri-arrow-right-s-fill"></i></button>
+            </div>
+          </div>
+        </div>
 
+        <!-- 贴在桌面上的贴纸层 -->
+        <div id="layer"></div>
+      </div>
+      <div id="toast" class="px-box"></div>
+    </div>
+  </main>
 
-  <div id="toast" class="px-box"></div>
+  <aside id="strips"><p class="dim side-placeholder">贴纸条（下一步）</p></aside>
 </div>
+
+<!-- 撕贴纸的 WebGL 层：盖满整个窗口、按屏幕像素画，只画正在撕的那一张；不接事件 -->
+<canvas id="peel"></canvas>
 
 <!-- 设置 -->
 <div id="modal" class="modal" hidden>

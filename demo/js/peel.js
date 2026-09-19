@@ -1,12 +1,12 @@
-// 撕贴纸：舞台上盖一层透明的 WebGL 画布，只画"正在撕的那一张"。其余贴纸仍是普通图片。
+// 撕贴纸：整个窗口上盖一层透明的 WebGL 画布，只画"正在撕的那一张"。其余贴纸仍是普通图片。
+// 一切几何都是屏幕像素（client 坐标）：画布缩放、贴纸条上的缩略图都不用另算投影，调用方换算好尺寸和位置传进来。
 // 卷曲模型参考 CatsJuice/sticker-forge（MIT）：越过折线的部分绕半径 R 的圆柱卷起来，
 // 卷过去露出白色离型纸背面；还贴着的部分完全不动、不拉伸。
 import * as THREE from '../vendor/three.module.js';
 
-const STAGE_W = 1672, STAGE_H = 941;
 const PI = Math.PI;
 export const DETACH_AT = 0.74;   // 揭过这么多就整张离开、拿在手上；不到就松手弹回去
-const MIN_PULL = 30;              // 至少拖这么远（舞台像素）才允许整张离开，小贴纸也要看得到卷起来
+const MIN_PULL = 30;              // 至少拖这么远（屏幕像素）才允许整张离开，小贴纸也要看得到卷起来
 
 // 网格坐标：贴纸中心为原点、y 向上。uOrigin/uDir 描述"从哪条边、朝哪个方向揭"，uFront 是折线走了多远
 const vertexShader = /* glsl */ `
@@ -61,7 +61,7 @@ export function createPeeler(canvas) {
   catch (e) { console.warn('WebGL 不可用，贴纸改为直接拿起', e); return null; }
   renderer.setClearColor(0x000000, 0);
   const scene = new THREE.Scene();
-  const camera = new THREE.OrthographicCamera(0, STAGE_W, 0, -STAGE_H, -100, 100);   // 世界 y 向上 = 舞台 y 取负
+  const camera = new THREE.OrthographicCamera(0, innerWidth, 0, -innerHeight, -100, 100);   // 世界 y 向上 = 屏幕 y 取负
 
   const U = {
     uCenter: { value: new THREE.Vector2() }, uRot: { value: 0 },
@@ -125,14 +125,17 @@ export function createPeeler(canvas) {
     draw();
   }
 
-  function resize(scale) {
-    renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1) * scale);
-    renderer.setSize(STAGE_W, STAGE_H, false);
+  // 画布盖满窗口、按设备像素比画。画布再怎么缩放也不影响它：撕纸几何全是屏幕像素，画布永远不超过窗口 × dpr
+  function resize() {
+    renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+    renderer.setSize(innerWidth, innerHeight, false);
+    camera.right = innerWidth; camera.bottom = -innerHeight;
+    camera.updateProjectionMatrix();
     draw();
   }
 
-  // 开始撕：key/img 是贴纸图，w/h 显示尺寸，smooth 是否平滑采样，c 中心（舞台坐标），rot 角度，
-  // grab 按下点（贴纸自身坐标，y 向下），sil 轮廓
+  // 开始撕：key/img 是贴纸图，w/h 屏幕上的显示尺寸，smooth 是否平滑采样，c 中心（屏幕坐标），rot 角度，
+  // grab 按下点（贴纸自身坐标、屏幕像素、y 向下），sil 轮廓（同一坐标系）
   function begin({ key, img, w, h, smooth, c, rot, grab, sil }) {
     pending?.();
     geo.dispose();
@@ -183,7 +186,7 @@ export function createPeeler(canvas) {
         const progress = Math.min(1, st.front / Math.max(1, sil.maxAlong(o, st.dir)));
         return len < MIN_PULL ? Math.min(progress, DETACH_AT - 0.01) : progress;
       },
-      // 贴纸中心挪到 (x, y)（舞台坐标）；展平动画进行中只更新终点，由动画去追
+      // 贴纸中心挪到 (x, y)（屏幕坐标）；展平动画进行中只更新终点，由动画去追
       moveTo(x, y) {
         if (st.target) { st.target = { x, y }; return; }
         U.uCenter.value.set(x, -y); draw();

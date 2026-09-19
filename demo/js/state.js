@@ -1,6 +1,6 @@
 // 游戏状态：装机清单 + 作品列表 + 设置。
 // 规矩：画面永远从这里算出来；改状态只走 apply(action)；读旧存档走 normalize()。
-export const STATE_VERSION = 4;
+export const STATE_VERSION = 5;   // 5：加 ui（相机、面板折叠），不进撤销
 const DEFAULT_PACK = 'petalpop-default';
 
 // 本子默认摆在桌面空位中央。贴纸和本子都是原始大小，不缩放、不翻转。
@@ -24,7 +24,19 @@ export function makeState() {
     projects: { p1: makeProject('p1', '我的本子') },
     settings: { bgm: true, bgmRef: null, volume: 0.5, skinRef: null },
     packs: {},          // 包 id → { enabled, order }
+    ui: { cam: null, sideCollapsed: false, strips: {} },   // 视角和面板状态：跟作品无关，撤销不管它
   };
+}
+
+const ZOOM = [0.25, 4];
+function normUi(u) {
+  const ui = { cam: null, sideCollapsed: false, strips: {}, ...(u && typeof u === 'object' ? u : {}) };
+  const c = ui.cam;
+  ui.cam = c && Number.isFinite(c.x) && Number.isFinite(c.y) && Number.isFinite(c.z) && c.z >= ZOOM[0] && c.z <= ZOOM[1]
+    ? { x: c.x, y: c.y, z: c.z } : null;
+  ui.sideCollapsed = !!ui.sideCollapsed;
+  ui.strips = Object.fromEntries(Object.entries(ui.strips && typeof ui.strips === 'object' ? ui.strips : {}).map(([k, v]) => [k, { collapsed: !!v?.collapsed }]));
+  return ui;
 }
 
 // 贴纸条目字段：
@@ -81,6 +93,7 @@ export function normalize(raw) {
   s.settings.volume = clamp(+s.settings.volume || 0, [0, 1]);
   if (typeof s.settings.skinRef !== 'string') s.settings.skinRef = null;   // null = 默认主题，本身就是合法选择
   s.packs = (s.packs && typeof s.packs === 'object') ? s.packs : {};
+  s.ui = normUi(s.ui);
   return s;
 }
 
@@ -142,6 +155,8 @@ export function apply(state, a) {
     case 'sheetMove': p.sheetT.x = r2(a.x); p.sheetT.y = r2(a.y); return;
     case 'sheetPage': p.sheetT.page = Math.max(0, a.page | 0); return;
     case 'setSetting': Object.assign(state.settings, a.patch); return;
+    case 'setUi': Object.assign(state.ui, a.patch); return;
+    case 'setStripUi': state.ui.strips[a.id] = { ...(state.ui.strips[a.id] || {}), ...a.patch }; return;
     case 'setBgm':
       if (a.on != null) state.settings.bgm = !!a.on;
       if (a.ref !== undefined) state.settings.bgmRef = a.ref;
