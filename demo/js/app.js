@@ -126,13 +126,16 @@ async function render() {
   await ensureUrls();
   paint();
   syncBgm();
+  syncHistoryButtons();
 }
 
-// ---------- 撤销 ----------
-const history = [];
+// ---------- 撤销 / 重做 ----------
+// 两条快照栈：改动前把当前作品整份存进 past；撤销 = 当前进 future、取 past 顶；重做反过来。任何新改动清空 future
+const past = [], future = [];
 function snapshot() {
-  history.push(structuredClone(project(state)));
-  if (history.length > 60) history.shift();
+  past.push(structuredClone(project(state)));
+  if (past.length > 60) past.shift();
+  future.length = 0;
 }
 let lastCommit = { type: '', t: 0 };
 function commit(action, { coalesce = false } = {}) {
@@ -144,13 +147,18 @@ function commit(action, { coalesce = false } = {}) {
   save();
   return r;
 }
-function undo() {
-  const snap = history.pop();
-  if (!snap) return showToast('没有可撤销的了');
+function restore(snap, to) {
+  to.push(structuredClone(project(state)));
   state.projects[snap.id] = snap;
   lastCommit = { type: '', t: 0 };
   save();
   render();
+}
+function undo() { const s = past.pop(); s ? restore(s, future) : showToast('没有可撤销的了'); }
+function redo() { const s = future.pop(); s ? restore(s, past) : showToast('没有可重做的了'); }
+function syncHistoryButtons() {
+  $('#btn-undo').disabled = !past.length;
+  $('#btn-redo').disabled = !future.length;
 }
 
 // ---------- 坐标 ----------
@@ -219,8 +227,7 @@ stage.addEventListener('pointerdown', e => {
   if (!hit) { select(null); render(); return; }
   if (hit.kind === 'board' || hit.kind === 'sheet') {
     const t = hit.kind === 'board' ? p.boardT : p.sheetT;
-    snapshot();
-    drag = { kind: hit.kind, dx: t.x - pt.x, dy: t.y - pt.y };
+    drag = { kind: hit.kind, dx: t.x - pt.x, dy: t.y - pt.y, snapped: false };   // 快照等真的动了再打：点一下不算改动，不清重做栈
     select(hit.kind === 'board' ? { kind: 'board' } : null);
     render();
     return;
@@ -235,13 +242,13 @@ stage.addEventListener('pointerdown', e => {
   startPeel(hit, pt);
 });
 
+// 快照不在这里打，等真的揭下来那一刻（pickUp 之前）再打：撕到一半放弃不算一次改动，也不该清掉重做栈
 function startPeel(hit, pt) {
-  snapshot();
   const src = { uid: hit.uid ?? null, ref: hit.ref, c: hit.c, rot: hit.rot, el: hit.el, grab: hit.local };
   const handle = peeler && hit.sil
     ? peeler.begin({ key: resolveRef(hit.ref).entry.sha256, img: hit.el, w: hit.w, h: hit.h, smooth: hit.smooth, c: hit.c, rot: hit.rot, grab: hit.local, sil: hit.sil })
     : null;
-  if (!handle) { pickUp(src, pt, null); return; }
+  if (!handle) { snapshot(); pickUp(src, pt, null); return; }
   hit.el.style.visibility = 'hidden';
   drag = { kind: 'peel', src, handle, start: pt };
 }
@@ -284,9 +291,8 @@ function settle(d, e) {
   apply(state, { type: 'move', uid: d.uid, x: pos.x, y: pos.y, on: onBoard ? 'board' : 'desk' });   // 就贴在松手的地方，不做落下动画
 }
 
-// 没揭下来就松手：弹回贴平，状态没变，撤销记录也不留
+// 没揭下来就松手：弹回贴平，状态没变（快照还没打，撤销/重做栈都不动）
 function springBack(d) {
-  history.pop();
   d.handle.release().then(() => { d.src.el.style.visibility = ''; });
 }
 
@@ -299,7 +305,7 @@ addEventListener('pointermove', e => {
   if (drag.kind === 'peel') {
     const { src, handle, start } = drag;
     const d = unrotate(pt.x - start.x, pt.y - start.y, src.rot);
-    if (handle.update(d.x, d.y) >= DETACH_AT) pickUp(src, pt, handle);
+    if (handle.update(d.x, d.y) >= DETACH_AT) { snapshot(); pickUp(src, pt, handle); }
   } else if (drag.kind === 'hold') {
     const x = pt.x + drag.dx, y = pt.y + drag.dy;
     apply(state, { type: 'move', uid: drag.uid, x, y });
@@ -307,6 +313,7 @@ addEventListener('pointermove', e => {
     if (el && it) renderer.placeStyle(el, it);
     if (drag.unrolling) drag.handle.moveTo(x, y);
   } else {
+    if (!drag.snapped) { snapshot(); drag.snapped = true; }
     apply(state, { type: drag.kind === 'board' ? 'boardMove' : 'sheetMove', x: pt.x + drag.dx, y: pt.y + drag.dy });
     if (drag.kind === 'sheet') clampSheet();
     paint();
@@ -333,8 +340,10 @@ addEventListener('pointercancel', () => {
   render();
 });
 
-// 滚轮转贴纸（想放回就把贴纸拖回纸上）
+// 按住 R + 滚轮转贴纸（单独的滚轮留给画布缩放）
+let rHeld = false;
 stage.addEventListener('wheel', e => {
+  if (!rHeld) return;
   const hit = hitTest(e);
   if (hit?.kind !== 'item') return;
   e.preventDefault();
@@ -357,12 +366,17 @@ $('#sheet-next').onclick = () => turnPage(1);
 
 addEventListener('keydown', e => {
   if (e.target.tagName === 'INPUT') return;
-  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); undo(); return; }
+  const k = e.key.toLowerCase(), mod = e.ctrlKey || e.metaKey;
+  if (k === 'r' && !mod) rHeld = true;
+  if (mod && k === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); return; }
+  if (mod && k === 'y') { e.preventDefault(); redo(); return; }
   if (e.key === 'Escape') { if (!modal.hidden) modal.hidden = true; else { select(null); render(); } return; }
   if (!modal.hidden) return;
   if (e.key === 'ArrowLeft') return turnPage(-1);
   if (e.key === 'ArrowRight') return turnPage(1);
 });
+addEventListener('keyup', e => { if (e.key.toLowerCase() === 'r') rHeld = false; });
+addEventListener('blur', () => { rHeld = false; });   // 按着 R 切走窗口，回来时别还当它按着
 
 // ---------- 音乐 ----------
 function syncBgm() {
@@ -417,6 +431,7 @@ $('#btn-skin').onclick = async () => {
   showToast(`皮肤 ${list.indexOf(ref) + 1} / ${list.length}：${cfg ? cfg.name : '默认'}`);
 };
 $('#btn-undo').onclick = undo;
+$('#btn-redo').onclick = redo;
 $('#btn-clear').onclick = () => {
   if (!project(state).items.length) return;
   commit({ type: 'clear' }); select(null); render();
@@ -588,7 +603,7 @@ async function importSave(file) {
   if (!raw || typeof raw !== 'object' || !raw.projects) return showToast('不是花漾贴贴的存档');
   if (!confirm('导入会覆盖当前存档（素材包不受影响），继续？')) return;
   state = normalize(raw);
-  history.length = 0;
+  past.length = future.length = 0;
   select(null);
   await reloadPacks();
   fillDefaults();
