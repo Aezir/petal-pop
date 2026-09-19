@@ -23,17 +23,23 @@ export function makeState() {
     projects: { p1: makeProject('p1', '我的本子') },
     settings: { bgm: true, bgmRef: null, volume: 0.5, skinRef: null },
     packs: {},          // 包 id → { enabled, order }
-    ui: { sideOpen: true, stripsOpen: true, strips: {} },   // 面板开关：跟作品无关，撤销不管它
+    ui: { sideOpen: true, stripsOpen: true, strips: {}, packSort: { key: 'manual', dir: 1 } },   // 面板状态：跟作品无关，撤销不管它
   };
 }
 
 export const ZOOM = [0.25, 4];
+export const PACK_SORTS = ['manual', 'name', 'added'];   // 自定义（拖出来的顺序）/ 名称 / 添加时间
 function normUi(u) {
   const ui = { sideOpen: true, stripsOpen: true, strips: {}, ...(u && typeof u === 'object' ? u : {}) };
   delete ui.cam;              // v5 的相机：背景锁死之后没有相机了
   delete ui.sideCollapsed;    // v5 的左栏折叠：换成 sideOpen
   ui.sideOpen = ui.sideOpen !== false;
   ui.stripsOpen = ui.stripsOpen !== false;
+  const ps = ui.packSort;
+  ui.packSort = {
+    key: PACK_SORTS.includes(ps?.key) ? ps.key : 'manual',
+    dir: ps?.dir === -1 ? -1 : 1,
+  };
   ui.strips = Object.fromEntries(Object.entries(ui.strips && typeof ui.strips === 'object' ? ui.strips : {}).map(([k, v]) => [k, { collapsed: !!v?.collapsed }]));
   return ui;
 }
@@ -92,7 +98,7 @@ export function normalize(raw) {
   s.settings.volume = clamp(+s.settings.volume || 0, [0, 1]);
   if (typeof s.settings.skinRef !== 'string') s.settings.skinRef = null;   // null = 默认主题，本身就是合法选择
   s.packs = Object.fromEntries(Object.entries(s.packs && typeof s.packs === 'object' ? s.packs : {})
-    .map(([id, v]) => [id, { enabled: v?.enabled !== false, order: +v?.order || 0, pinned: !!v?.pinned, fav: !!v?.fav }]));
+    .map(([id, v]) => [id, { enabled: v?.enabled !== false, order: +v?.order || 0, pinned: !!v?.pinned, fav: !!v?.fav, addedAt: +v?.addedAt || 0 }]));
   s.ui = normUi(s.ui);
   return s;
 }
@@ -161,8 +167,8 @@ export function apply(state, a) {
       if (a.on != null) state.settings.bgm = !!a.on;
       if (a.ref !== undefined) state.settings.bgmRef = a.ref;
       return;
-    case 'setPack':
-      state.packs[a.id] = { enabled: true, order: Date.now(), pinned: false, fav: false, ...(state.packs[a.id] || {}), ...a.patch };
+    case 'setPack':   // 第一次见到这个包时才写 addedAt；已有记录不动它
+      state.packs[a.id] = { enabled: true, order: Date.now(), pinned: false, fav: false, addedAt: a.addedAt || Date.now(), ...(state.packs[a.id] || {}), ...a.patch };
       return;
     case 'packOrder':   // { ids }：按给定顺序重编 order（置顶组和普通组各自的相对顺序都在这一个序列里）
       a.ids.forEach((id, i) => { if (state.packs[id]) state.packs[id].order = i; });

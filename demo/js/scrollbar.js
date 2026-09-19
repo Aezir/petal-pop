@@ -53,7 +53,7 @@ export function attachScrollbar(el, { z = 35 } = {}) {
     e.preventDefault(); e.stopPropagation();
     const h = Math.max(MIN_THUMB, el.getBoundingClientRect().height - PAD * 2);
     grab = { y: e.clientY, top: el.scrollTop, span: Math.max(1, h - thumb.offsetHeight), over: el.scrollHeight - el.clientHeight };
-    thumb.setPointerCapture(e.pointerId);
+    try { thumb.setPointerCapture(e.pointerId); } catch {}
     show();
   });
   thumb.addEventListener('pointermove', e => {

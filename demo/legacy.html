@@ -53,6 +53,13 @@
         <button class="chip" data-cat="sticker" style="--tone:var(--t3)">贴纸<i></i></button>
         <button class="chip" data-cat="deco" style="--tone:var(--t2)">美化<i></i></button>
       </div>
+      <!-- 排序：点当前项 = 反向，点别的项 = 切过去并回到正向。自定义 = 拖出来的顺序 -->
+      <div id="pack-sort" class="chips sort-row">
+        <span class="dim sort-label">排序</span>
+        <button class="chip" data-sort="manual" style="--tone:var(--t1)">自定义<i></i></button>
+        <button class="chip" data-sort="name" style="--tone:var(--t1)">名称<i></i></button>
+        <button class="chip" data-sort="added" style="--tone:var(--t1)">添加<i></i></button>
+      </div>
       <div class="add-row">
         <input id="pack-input" placeholder="用户名/仓库名@标签  或  local:packs/xxx" spellcheck="false">
         <button id="btn-add" class="btn primary" title="从 GitHub 或本地目录安装"><i class="ri-add-line"></i></button>

@@ -78,14 +78,27 @@ const refIndex = new Map();  // 'pack:id' → { pack, entry }
 
 // 包的分类按内容推导：有贴纸的算「贴纸」，只有本子/桌面/音乐/皮肤的算「美化」
 const catOf = p => (p.entries.some(e => e.type === 'sticker') ? 'sticker' : 'deco');
-// 排序：置顶的在前，然后按 order；这个顺序同时决定左栏列表、右栏贴纸条、换本子/桌面/皮肤的循环顺序
+// 排序：置顶的永远在上面，组内再按 ui.packSort（自定义 = 拖出来的 order / 名称 / 添加时间）。
+// 算出来的顺序是唯一真相：左栏列表、右栏贴纸条、换本子/桌面/皮肤的循环顺序都用它
+const nameOfPack = p => Packs.displayName(p.name) || p.id;
 const packCmp = (a, b) => {
   const ma = state.packs[a.id] || {}, mb = state.packs[b.id] || {};
-  return (+!!mb.pinned - +!!ma.pinned) || ((ma.order || 0) - (mb.order || 0)) || Packs.displayName(a.name).localeCompare(Packs.displayName(b.name));
+  const pin = (+!!mb.pinned - +!!ma.pinned);
+  if (pin) return pin;
+  const { key, dir } = state.ui.packSort;
+  let d = 0;
+  if (key === 'name') d = nameOfPack(a).localeCompare(nameOfPack(b), 'zh');
+  else if (key === 'added') d = (ma.addedAt || 0) - (mb.addedAt || 0);
+  else d = (ma.order || 0) - (mb.order || 0);
+  return (d * dir) || nameOfPack(a).localeCompare(nameOfPack(b), 'zh');
 };
 async function reloadPacks() {
   installed = await Packs.listPacks();
-  for (const p of installed) if (!state.packs[p.id]) apply(state, { type: 'setPack', id: p.id, patch: {} });
+  // 老存档里的包没有 addedAt，拿 packs 表里的安装时间补上（那张表也没有就算 0）
+  for (const p of installed) {
+    if (!state.packs[p.id]) apply(state, { type: 'setPack', id: p.id, patch: {}, addedAt: p.installedAt || Date.now() });
+    else if (!state.packs[p.id].addedAt) apply(state, { type: 'setPack', id: p.id, patch: { addedAt: p.installedAt || 0 } });
+  }
   enabledPacks = installed.filter(p => state.packs[p.id]?.enabled !== false).sort(packCmp);
   refIndex.clear();
   for (const p of enabledPacks) for (const e of p.entries) refIndex.set(p.id + ':' + e.id, { pack: p, entry: e });
@@ -442,7 +455,7 @@ function springBack(d) {
 
 addEventListener('pointermove', e => {
   if (!drag) {
-    if (!overUi(e) && viewport.contains(e.target)) viewport.style.cursor = cursorFor(hitTest(e));
+    if (!overUi(e) && e.target instanceof Node && viewport.contains(e.target)) viewport.style.cursor = cursorFor(hitTest(e));
     else viewport.style.cursor = '';
     return;
   }
@@ -647,7 +660,102 @@ const fmtMB = b => (b / 1048576).toFixed(1) + ' MB';
 // 左栏图包列表：分类 chip 过滤，置顶在前；每行 启用 / 名称 / 元信息 / 上移 下移 置顶 收藏 更新 卸载
 let packCat = 'all';
 $('#pack-chips').onclick = e => { const c = e.target.closest('.chip'); if (!c) return; packCat = c.dataset.cat; renderPackList(); };
+// 排序：点当前项 = 反向，点别的项 = 切过去、方向回正
+$('#pack-sort').onclick = e => {
+  const c = e.target.closest('.chip');
+  if (!c) return;
+  const cur = state.ui.packSort;
+  setPackSort(c.dataset.sort === cur.key ? { key: cur.key, dir: -cur.dir } : { key: c.dataset.sort, dir: 1 });
+};
+function setPackSort(packSort) {
+  apply(state, { type: 'setUi', patch: { packSort } });
+  save();
+  refresh();
+}
+function syncSortChips() {
+  const { key, dir } = state.ui.packSort;
+  for (const c of $('#pack-sort').querySelectorAll('.chip')) {
+    const on = c.dataset.sort === key;
+    c.classList.toggle('on', on);
+    c.querySelector('i').textContent = on ? (dir > 0 ? '↑' : '↓') : '';
+  }
+}
+
+// ---------- 左栏拖动排序 ----------
+// 抓手上按下、移动超过 4px 才算拖：原行变半透明，跟着鼠标的是一个克隆的影子，列表里画一条插入线。
+// 只允许在同一个置顶组里换位置（拖出组的范围就贴在组边界）。
+// 在「名称 / 添加」模式下开始拖：先把眼前这个顺序固化成自定义，再拖——不然松手看到的顺序会跳回去
+let packDrag = null;
+function startPackDrag(e, row, id, pinned) {
+  if (e.button !== 0) return;
+  e.preventDefault();
+  try { row.querySelector('.pack-grip').setPointerCapture(e.pointerId); } catch {}   // 合成事件没有真实指针，捕获失败不影响后面的 window 监听
+  packDrag = { id, pinned, row, x: e.clientX, y: e.clientY, live: false, ghost: null, line: null, at: -1 };
+}
+function packRows() {
+  return [...packList.querySelectorAll('.pack-row')];
+}
+function beginPackDrag() {
+  const d = packDrag;
+  d.live = true;
+  // 名称/添加模式：把当前显示顺序固化成 order，再切回自定义
+  if (state.ui.packSort.key !== 'manual') {
+    apply(state, { type: 'packOrder', ids: [...installed].sort(packCmp).map(p => p.id) });
+    apply(state, { type: 'setUi', patch: { packSort: { key: 'manual', dir: 1 } } });
+    syncSortChips();
+  }
+  const r = d.row.getBoundingClientRect();
+  const ghost = d.row.cloneNode(true);
+  ghost.className = 'pack-row pack-ghost';
+  ghost.style.width = r.width + 'px';
+  ghost.style.left = r.left + 'px';
+  ghost.style.top = r.top + 'px';
+  d.offY = d.y - r.top;
+  document.body.appendChild(ghost);
+  d.ghost = ghost;
+  d.line = document.createElement('div');
+  d.line.className = 'pack-drop-line';
+  packList.appendChild(d.line);
+  d.row.classList.add('dragging-row');
+}
+addEventListener('pointermove', e => {
+  const d = packDrag;
+  if (!d) return;
+  if (!d.live) {
+    if (Math.hypot(e.clientX - d.x, e.clientY - d.y) < 4) return;
+    beginPackDrag();
+  }
+  d.ghost.style.top = (e.clientY - d.offY) + 'px';
+  // 只在同一置顶组里找插入位置
+  const rows = packRows().filter(r => r !== d.row && !!state.packs[r.dataset.pack]?.pinned === d.pinned);
+  let at = rows.length;
+  for (let i = 0; i < rows.length; i++) {
+    const r = rows[i].getBoundingClientRect();
+    if (e.clientY < r.top + r.height / 2) { at = i; break; }
+  }
+  d.at = at;
+  d.group = rows;
+  const ref = rows[at], pr = packList.getBoundingClientRect();
+  const y = ref ? ref.getBoundingClientRect().top : (rows.length ? rows[rows.length - 1].getBoundingClientRect().bottom : d.row.getBoundingClientRect().top);
+  d.line.style.top = (y - pr.top + packList.scrollTop - 3) + 'px';
+}, true);
+addEventListener('pointerup', () => {
+  const d = packDrag;
+  if (!d) return;
+  packDrag = null;
+  if (!d.live) return;
+  d.ghost.remove(); d.line.remove();
+  d.row.classList.remove('dragging-row');
+  // 新顺序：整份排序后的列表里，把这一行抽出来插到目标位置（只在本组内动）
+  const ids = [...installed].sort(packCmp).map(p => p.id).filter(x => x !== d.id);
+  const target = d.group[d.at]?.dataset.pack;
+  const i = target ? ids.indexOf(target) : -1;
+  ids.splice(i < 0 ? (d.group.length ? ids.indexOf(d.group[d.group.length - 1].dataset.pack) + 1 : ids.length) : i, 0, d.id);
+  apply(state, { type: 'packOrder', ids });
+  refresh();
+}, true);
 function renderPackList() {
+  syncSortChips();
   const sorted = [...installed].sort(packCmp);
   const counts = { all: sorted.length, sticker: 0, deco: 0 };
   for (const p of sorted) counts[catOf(p)]++;
@@ -666,13 +774,12 @@ function renderPackList() {
     for (const e of p.entries) n[e.type] = (n[e.type] || 0) + 1;
     row.innerHTML = `
       <div class="pack-main">
+        <i class="pack-grip ri-draggable" title="拖动排序"></i>
         <input type="checkbox" title="启用 / 停用" ${on ? 'checked' : ''}>
         <span class="pack-name"></span>
       </div>
       <div class="pack-meta"></div>
       <div class="pack-actions">
-        <button class="btn icon act-up" title="上移"><i class="ri-arrow-up-s-line"></i></button>
-        <button class="btn icon act-down" title="下移"><i class="ri-arrow-down-s-line"></i></button>
         <button class="btn icon act-pin${meta.pinned ? ' lit' : ''}" title="${meta.pinned ? '取消置顶' : '置顶'}"><i class="${meta.pinned ? 'ri-pushpin-fill' : 'ri-pushpin-line'}"></i></button>
         <button class="btn icon act-fav${meta.fav ? ' lit' : ''}" title="${meta.fav ? '取消收藏' : '收藏'}"><i class="${meta.fav ? 'ri-star-fill' : 'ri-star-line'}"></i></button>
         <button class="btn icon act-update" title="检查这个来源有没有新版本"><i class="ri-download-cloud-2-line"></i></button>
@@ -692,16 +799,8 @@ function renderPackList() {
     const box = row.querySelector('input');
     box.onchange = () => { apply(state, { type: 'setPack', id: p.id, patch: { enabled: box.checked } }); refresh(); };
     name.onclick = () => { box.checked = !box.checked; box.onchange(); };
-    // 上移 / 下移：只和同一置顶组里的邻居换位置（换的是排序后整份列表里的位置，然后按新顺序重编 order）
-    const swap = dir => {
-      const ids = sorted.map(q => q.id), i = ids.indexOf(p.id), j = i + dir;
-      if (j < 0 || j >= ids.length || !!state.packs[ids[j]]?.pinned !== !!meta.pinned) return;
-      [ids[i], ids[j]] = [ids[j], ids[i]];
-      apply(state, { type: 'packOrder', ids });
-      refresh();
-    };
-    row.querySelector('.act-up').onclick = () => swap(-1);
-    row.querySelector('.act-down').onclick = () => swap(1);
+    row.dataset.pack = p.id;
+    row.querySelector('.pack-grip').addEventListener('pointerdown', ev => startPackDrag(ev, row, p.id, !!meta.pinned));
     row.querySelector('.act-pin').onclick = () => { apply(state, { type: 'setPack', id: p.id, patch: { pinned: !meta.pinned } }); refresh(); };
     row.querySelector('.act-fav').onclick = () => { apply(state, { type: 'setPack', id: p.id, patch: { fav: !meta.fav } }); save(); renderPackList(); };
     row.querySelector('.act-update').onclick = async ev => {

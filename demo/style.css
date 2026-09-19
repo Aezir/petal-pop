@@ -111,9 +111,19 @@ html,body{margin:0;height:100%;background:var(--bg);overflow:hidden;font:13.5px/
 }
 .add-row input:focus{border-color:var(--accent)}
 
+/* 排序那一行 */
+.sort-row{align-items:center}
+.sort-label{font-size:11px;letter-spacing:.08em}
+
 /* 包列表（左栏） */
-#pack-list{flex:1;overflow:auto;display:flex;flex-direction:column;gap:6px;min-height:60px}
+#pack-list{position:relative;flex:1;overflow:auto;display:flex;flex-direction:column;gap:6px;min-height:60px}
 .pack-row{display:flex;flex-direction:column;gap:4px;padding:8px 10px;border-radius:var(--radius-lg);background:var(--input);border-left:3px solid transparent}
+/* 拖动排序：抓手、被拖那一行、跟着鼠标的影子、插入线 */
+.pack-grip{flex:none;font-size:16px;color:var(--dim2);cursor:grab;touch-action:none}
+.pack-grip:active{cursor:grabbing}
+.pack-row.dragging-row{opacity:.35}
+.pack-ghost{position:fixed;z-index:95;pointer-events:none;opacity:.92;box-shadow:0 12px 30px var(--shadow);margin:0}
+.pack-drop-line{position:absolute;left:0;right:0;height:2px;border-radius:2px;background:var(--accent);pointer-events:none}
 .pack-row.off{opacity:.55}
 .pack-row.pinned{border-left-color:var(--accent)}
 .pack-main{display:flex;align-items:center;gap:8px;min-width:0}
