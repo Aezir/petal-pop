@@ -137,17 +137,18 @@ html,body{margin:0;height:100%;background:var(--bg);overflow:hidden;font:13.5px/
 .pack-actions .btn.lit{color:var(--accent)}
 
 /* ===== 本子（唯一能缩放的东西） ===== */
-/* wrap 是一个 0×0 的锚点，位置 = 本子中心；scale(boardZ) 绕这个原点缩放，等于绕本子中心缩放。
-   贴在本子上的贴纸以它为原点，跟着一起挪、一起缩放 */
-#boardWrap{position:absolute;width:0;height:0;transform-origin:0 0;z-index:1}
-#board{
+/* 桌上可以同时摆好几本。每本的 wrap 是一个 0×0 的锚点，位置 = 本子中心；
+   scale(boardZ) 绕这个原点缩放，等于绕本子中心缩放；数组顺序 = z-index，最后一本在最上面 */
+#boards{position:absolute;left:0;top:0;width:0;height:0}
+.board-wrap{position:absolute;width:0;height:0;transform-origin:0 0}
+.board-img{
   position:absolute;left:0;top:0;width:760px;
   transform:translate(-50%,-50%);
   filter:drop-shadow(6px 8px 0 var(--desk-shadow));
   pointer-events:none;
 }
-#boardWrap.selected #board{filter:drop-shadow(6px 8px 0 var(--desk-shadow)) drop-shadow(0 0 0 var(--accent)) drop-shadow(0 0 3px var(--accent))}
-#boardLayer{position:absolute;left:0;top:0;width:0;height:0}
+.board-wrap.selected .board-img{filter:drop-shadow(6px 8px 0 var(--desk-shadow)) drop-shadow(0 0 0 var(--accent)) drop-shadow(0 0 3px var(--accent))}
+.board-layer{position:absolute;left:0;top:0;width:0;height:0}
 
 /* ===== 贴纸 ===== */
 /* 所有贴纸都不接指针事件：点到谁由 app.js 的命中检测按透明度判断 */

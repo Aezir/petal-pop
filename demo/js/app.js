@@ -17,8 +17,7 @@ const DEFAULT_SOURCES = ['local:packs/default', 'Aezir/petal-pop-assets'];
 const $ = s => document.querySelector(s);
 
 const viewport = $('#viewport'), world = $('#world'), zoomReadout = $('#zoom-readout'), stripsEl = $('#strips'), sideEl = $('#side'),
-      topbar = $('#topbar'), handEl = $('#hand'), layer = $('#layer'), boardWrap = $('#boardWrap'), boardEl = $('#board'),
-      boardLayer = $('#boardLayer'), toast = $('#toast'), audio = $('#bgm'), loading = $('#loading'), loadText = $('#load-text'),
+      topbar = $('#topbar'), handEl = $('#hand'), layer = $('#layer'), boardsHost = $('#boards'), toast = $('#toast'), audio = $('#bgm'), loading = $('#loading'), loadText = $('#load-text'),
       bar = $('#bar'), modal = $('#modal'), packList = $('#pack-list');
 
 // 撕贴纸用的 WebGL 层；浏览器不支持 WebGL 时为 null，贴纸从边缘按下就直接拿起
@@ -27,7 +26,7 @@ const peeler = createPeeler($('#peel'));
 // ---------- 桌面（锁死）与本子（能缩放） ----------
 // 桌面背景是锁死的：#world 铺满整个窗口（cover：按长边贴合、居中、多出来的部分裁掉），
 // 只有窗口大小会改变 fit，玩家怎么操作都不动它。工具行和两个面板浮在它上面，开合不挤压画面。
-// 能放大缩小的是本子（画布）：#boardWrap 的 scale(boardZ)，存在 project.boardZ 里。
+// 能放大缩小的是本子（画布）：每本 .board-wrap 的 scale(boardZ)，存在 project.boardZ 里。
 const ZMIN = 0.25, ZMAX = 4;
 const clampZ = z => Math.min(ZMAX, Math.max(ZMIN, z));
 // fit = 每桌面单位多少屏幕像素；fitX/fitY 是世界层左上角在窗口里的位置（cover 时通常是负的）
@@ -46,10 +45,11 @@ function syncZoom() { zoomReadout.textContent = Math.round(boardZ() * 100) + '%'
 function boardZoomAt(clientX, clientY, factor) {
   const p = project(state), z0 = p.boardZ, z1 = clampZ(z0 * factor);
   if (Math.abs(z1 - z0) < 1e-6) return;
-  const pt = toStage({ clientX, clientY });                                  // 鼠标处的桌面坐标（不会变）
-  const l = { x: (pt.x - p.boardT.x) / z0, y: (pt.y - p.boardT.y) / z0 };    // 它落在本子上的哪一点
+  const pt = toStage({ clientX, clientY });   // 鼠标处的桌面坐标（背景锁死，这个点永远不动）
   apply(state, { type: 'boardZoom', z: z1 });
-  apply(state, { type: 'boardMove', x: pt.x - l.x * p.boardZ, y: pt.y - l.y * p.boardZ });
+  const k = p.boardZ / z0;
+  // 每本本子的位置都绕这个点缩放：这样整桌东西是一次以鼠标为中心的整体缩放，鼠标底下那个点不漂
+  for (const b of [...p.boards]) apply(state, { type: 'boardMove', id: b.id, x: pt.x + (b.x - pt.x) * k, y: pt.y + (b.y - pt.y) * k });
   syncZoom(); save(); paint();
 }
 addEventListener('resize', () => { applyFit(); peeler?.resize(); });
@@ -110,7 +110,7 @@ const refsOfType = type => enabledPacks.flatMap(p => p.entries.filter(e => e.typ
 // 显示时用 effective() 临时兜底，包装回来选择自动恢复。
 function fillDefaults() {
   const p = project(state);
-  if (p.board == null) p.board = refsOfType('board')[0] || null;
+  if (!p.seeded) { const r = refsOfType('board')[0]; if (r) apply(state, { type: 'addBoard', ref: r }); p.seeded = true; }
   if (p.background == null) p.background = refsOfType('background')[0] || null;
   if (state.settings.bgmRef == null) state.settings.bgmRef = refsOfType('bgm')[0] || null;
 }
@@ -118,7 +118,6 @@ const effective = (type, ref) => (resolveRef(ref) ? ref : refsOfType(type)[0] ||
 function view() {
   const p = project(state);
   return {
-    board: effective('board', p.board),
     background: effective('background', p.background),
     bgm: effective('bgm', state.settings.bgmRef),
   };
@@ -135,12 +134,12 @@ async function syncSkin() {
 // 把画面要用到的 blob 都换成对象地址（第一次从 IndexedDB 读，之后命中缓存）
 async function ensureUrls() {
   const p = project(state), v = view();
-  const refs = [v.board, v.background, v.bgm, ...p.items.map(i => i.ref), ...refsOfType('sticker')];
+  const refs = [v.background, v.bgm, ...p.boards.map(b => b.ref), ...p.items.map(i => i.ref), ...refsOfType('sticker')];
   await Promise.all(refs.map(r => { const h = resolveRef(r); return h ? Packs.urlFor(h.entry.sha256) : null; }));
 }
 
 // ---------- 选中 ----------
-let sel = null;   // { kind:'board' } | null（本子被选中时描一圈粉边；贴纸没有选中状态）
+let sel = null;   // { kind:'board', id } | null（本子被选中时描一圈粉边；贴纸没有选中状态）
 function select(s) { sel = s; }
 
 // ---------- 渲染 ----------
@@ -155,7 +154,7 @@ function sizeOf(ref) {
   const k = strips.scaleOf(h.pack.id);
   return { w: h.entry.w * k, h: h.entry.h * k, smooth: k < 0.999 };
 }
-const renderer = createRenderer({ stage: world, layer, boardWrap, boardEl, boardLayer, resolveRef, sizeOf });
+const renderer = createRenderer({ stage: world, layer, boardHost: boardsHost, resolveRef, sizeOf });
 const usedRefs = () => new Set(project(state).items.map(i => i.ref));
 // 同步重画（图片地址已经备好时用）。先画条：条算出各包的比例，贴纸按它定尺寸
 function paint() {
@@ -212,10 +211,19 @@ function inside(el, e) {
   const r = el.getBoundingClientRect();
   return e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
 }
-// 桌面坐标 ⇄ 本子局部坐标：本子挪了（boardT）也缩放了（boardZ），两边都要算
-const stageToBoard = (pt, p) => ({ x: (pt.x - p.boardT.x) / p.boardZ, y: (pt.y - p.boardT.y) / p.boardZ });
-const boardToStage = (pt, p) => ({ x: p.boardT.x + pt.x * p.boardZ, y: p.boardT.y + pt.y * p.boardZ });
-const overBoard = e => !boardWrap.hidden && inside(boardEl, e);
+// 桌面坐标 ⇄ 某一本本子的局部坐标：本子挪了（b.x/b.y）也缩放了（boardZ），两边都要算
+const stageToBoard = (pt, b, p) => ({ x: (pt.x - b.x) / p.boardZ, y: (pt.y - b.y) / p.boardZ });
+const boardToStage = (pt, b, p) => ({ x: b.x + pt.x * p.boardZ, y: b.y + pt.y * p.boardZ });
+const boardOf = (p, id) => p.boards.find(b => b.id === id);
+// 指针落在哪一本上：从最上面那本往下找（数组最后一本在最上面）
+function boardAt(e) {
+  const p = project(state);
+  for (let i = p.boards.length - 1; i >= 0; i--) {
+    const n = renderer.boardNode(p.boards[i].id);
+    if (n && !n.wrap.hidden && inside(n.img, e)) return p.boards[i];
+  }
+  return null;
+}
 // 浮层（工具行、两个面板、弹窗）上的指针事件不算点在桌面上
 const overUi = e => !!e.target?.closest?.('#topbar,#side,#strips,.modal,#loading');
 // 舞台上的一段位移 → 贴纸自身坐标（去掉贴纸的旋转，y 向下）
@@ -244,12 +252,17 @@ function hitTest(e) {
     const hit = hitSticker(pt, toScreen(it), it.rot, it.ref, renderer.node(it.uid), fit);
     if (hit) return { kind: 'item', uid: it.uid, ...hit };
   }
-  if (boardWrap.hidden) return null;
-  for (const it of p.items.filter(i => i.on === 'board').sort(byZ)) {
-    const hit = hitSticker(pt, toScreen(boardToStage(it, p)), it.rot, it.ref, renderer.node(it.uid), fit * p.boardZ);
-    if (hit) return { kind: 'item', uid: it.uid, ...hit };
+  // 本子从上往下：先试贴在这一本上的贴纸，再试本子自己，都没中就看下一本
+  for (let i = p.boards.length - 1; i >= 0; i--) {
+    const b = p.boards[i], n = renderer.boardNode(b.id);
+    if (!n || n.wrap.hidden) continue;
+    for (const it of p.items.filter(x => x.on === 'board' && x.board === b.id).sort(byZ)) {
+      const hit = hitSticker(pt, toScreen(boardToStage(it, b, p)), it.rot, it.ref, renderer.node(it.uid), fit * p.boardZ);
+      if (hit) return { kind: 'item', uid: it.uid, ...hit };
+    }
+    if (inside(n.img, e)) return { kind: 'board', id: b.id };
   }
-  return inside(boardEl, e) ? { kind: 'board' } : null;
+  return null;
 }
 const cursorFor = hit => !hit ? '' : hit.kind === 'board' ? 'move' : hit.edge ? 'grab' : 'default';
 
@@ -278,9 +291,10 @@ viewport.addEventListener('pointerdown', e => {
   const hit = hitTest(e), pt = toStage(e), p = project(state);
   if (!hit) { select(null); render(); return; }   // 点空白 = 取消选中（背景锁死，没有平移）
   if (hit.kind === 'board') {
-    const t = p.boardT;
-    drag = { kind: 'board', dx: t.x - pt.x, dy: t.y - pt.y, snapped: false };   // 快照等真的动了再打：点一下不算改动，不清重做栈
-    select({ kind: 'board' });
+    apply(state, { type: 'boardFront', id: hit.id });   // 点过的那本挪到最上面
+    const b = boardOf(p, hit.id);
+    drag = { kind: 'board', id: hit.id, dx: b.x - pt.x, dy: b.y - pt.y, snapped: false };   // 快照等真的动了再打：点一下不算改动，不清重做栈
+    select({ kind: 'board', id: hit.id });
     render();
     return;
   }
@@ -443,9 +457,9 @@ function settle(d, e) {
     apply(state, { type: 'remove', uids: [d.uid] });
     return;
   }
-  const onBoard = overBoard(e), it = findItem(p, d.uid);
-  const pos = onBoard ? stageToBoard(it, p) : it;
-  apply(state, { type: 'move', uid: d.uid, x: pos.x, y: pos.y, on: onBoard ? 'board' : 'desk' });   // 就贴在松手的地方，不做落下动画
+  const b = boardAt(e), it = findItem(p, d.uid);
+  const pos = b ? stageToBoard(it, b, p) : it;
+  apply(state, { type: 'move', uid: d.uid, x: pos.x, y: pos.y, on: b ? 'board' : 'desk', board: b?.id });   // 就贴在松手的地方，不做落下动画
 }
 
 // 没揭下来就松手：弹回贴平，状态没变（快照还没打，撤销/重做栈都不动）
@@ -469,7 +483,7 @@ addEventListener('pointermove', e => {
     if (hand) { hand.x = e.clientX; hand.y = e.clientY; paintHand(performance.now()); }
   } else {
     if (!drag.snapped) { snapshot(); drag.snapped = true; }
-    apply(state, { type: 'boardMove', x: pt.x + drag.dx, y: pt.y + drag.dy });
+    apply(state, { type: 'boardMove', id: drag.id, x: pt.x + drag.dx, y: pt.y + drag.dy });
     paint();
   }
 });
@@ -550,11 +564,14 @@ function cycle(type, current) {
   return list[(list.indexOf(current) + 1) % list.length];
 }
 $('#btn-bgm').onclick = () => { commit({ type: 'setBgm', on: !state.settings.bgm }); syncBgm(); };
+// 临时入口：再摆一本（下一步左栏的「本子」分类会接管）
 $('#btn-board').onclick = () => {
-  const ref = cycle('board', view().board);
-  if (!ref) return showToast('没有可用的底板');
-  commit({ type: 'setBoard', ref }); render();
-  showToast(`底板 ${refsOfType('board').indexOf(ref) + 1} / ${refsOfType('board').length}`);
+  const list = refsOfType('board');
+  if (!list.length) return showToast('没有可用的底板');
+  const p = project(state);
+  const ref = list[p.boards.length % list.length];
+  commit({ type: 'addBoard', ref }); render();
+  showToast(`桌上 ${p.boards.length} 本`);
 };
 $('#btn-bg').onclick = () => {
   const ref = cycle('background', view().background);

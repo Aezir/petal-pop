@@ -13,11 +13,9 @@
 <div id="viewport">
   <!-- 桌面世界：固定 1672×941，只按窗口大小整体 cover 缩放，不平移、不跟着缩放走 -->
   <div id="world">
-    <!-- 本子（画布）：wrap 是 0×0 锚点 + scale(boardZ)，贴在本子上的贴纸放在 boardLayer 里跟着一起挪、一起缩放 -->
-    <div id="boardWrap" hidden>
-      <img id="board" alt="board" draggable="false">
-      <div id="boardLayer"></div>
-    </div>
+    <!-- 桌上摆着的本子，render.js 按 project.boards 生成。
+         每本一个 0×0 锚点 + 共用的 scale(boardZ)，贴在它上面的贴纸放进它自己的 layer -->
+    <div id="boards"></div>
 
     <!-- 贴在桌面上的贴纸层：只跟窗口 fit 走，本子缩放不影响它 -->
     <div id="layer"></div>
