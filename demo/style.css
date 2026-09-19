@@ -147,9 +147,10 @@ html,body{margin:0;height:100%;background:var(--bg);overflow:hidden;font:13.5px/
 .strip.collapsed .chev{transform:rotate(-90deg)}
 .strip-name{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .strip-count{margin-left:auto;color:var(--dim2);font-size:11px;font-variant-numeric:tabular-nums}
-/* 条身就是一张贴纸纸：波点 + 渐变（或皮肤纹理，按原尺寸平铺），贴纸靠 flex 换行紧凑排 */
+/* 条身就是一张贴纸纸：波点 + 渐变（或皮肤纹理，按原尺寸平铺）。
+   贴纸按轮廓见缝插针地摆（strips.js 算坐标），所以是绝对定位、高度由排版决定 */
 .strip-body{
-  display:flex;flex-wrap:wrap;align-items:flex-end;gap:6px;padding:10px;
+  position:relative;padding:6px;
   background:
     radial-gradient(circle,var(--strip-dot) 0 3px,transparent 3.5px) 0 0/26px 26px,
     var(--skin-strip-bg,linear-gradient(160deg,var(--strip-paper),var(--strip-paper2)));
@@ -158,7 +159,7 @@ html,body{margin:0;height:100%;background:var(--bg);overflow:hidden;font:13.5px/
 .strip.collapsed .strip-body{display:none}
 /* 一格贴纸：外形按贴纸自己的透明度裁出来；贴纸撕走后，这格的底色就是底纸上亮面的刀模空位 */
 .slot{
-  position:relative;flex:0 0 auto;cursor:grab;image-rendering:auto;   /* 别继承纸的 pixelated：遮罩缩小时要平滑，否则刀模边缘出锯齿 */
+  position:absolute;cursor:grab;image-rendering:auto;   /* 别继承纸的 pixelated：遮罩缩小时要平滑，否则刀模边缘出锯齿 */
   -webkit-mask:var(--m) center/100% 100% no-repeat;mask:var(--m) center/100% 100% no-repeat;
   background:var(--strip-cut);
 }

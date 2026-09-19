@@ -264,18 +264,49 @@ viewport.addEventListener('pointerdown', e => {
   viewport.style.cursor = 'grabbing';
   startPeel(hit, e);
 });
-// 贴纸条上的格子：同一套撕法，k 换成这个包的缩略比例。不抓指针（拖出去的那张图片在画布世界里）
+// 贴纸条上的格子：同一套撕法，k 换成这个包的缩略比例。不抓指针（拖出去的那张图片在画布世界里）。
+// 贴纸是按轮廓见缝插针排的，包围盒会互相重叠，所以不能看 event.target：
+// 从最上面那张往下逐个按透明度试，上面那张的透明角落会自然"漏"到下面那张
+function slotHitAt(clientX, clientY, { skipUsed = true } = {}) {
+  for (const s of strips.slotsAt(clientX, clientY)) {
+    if (skipUsed && s.used) continue;   // 撕走的格子只留刀模空位，穿过去找下面那张
+    const r = s.rect;
+    const hit = hitSticker({ x: clientX, y: clientY }, { x: r.left + r.width / 2, y: r.top + r.height / 2 }, 0, s.ref, s.img, strips.thumbKOf(s.packId));
+    if (hit) return { slot: s, hit };
+  }
+  return null;
+}
 stripsEl.addEventListener('pointerdown', e => {
-  if (e.button !== 0) return;
-  const s = strips.slotAt(e.target);
-  if (!s) return;
+  if (e.button !== 0 || e.target.closest('.strip-head')) return;
+  const found = slotHitAt(e.clientX, e.clientY);
+  if (!found) return;
   e.preventDefault();
-  const r = s.el.getBoundingClientRect();
-  const hit = hitSticker({ x: e.clientX, y: e.clientY }, { x: r.left + r.width / 2, y: r.top + r.height / 2 }, 0, s.ref, s.img, strips.thumbKOf(s.packId));
-  if (!hit) return;
-  if (!hit.edge) return hintEdge();
-  startPeel(hit, e);
+  hideTip();
+  if (!found.hit.edge) return hintEdge();
+  startPeel(found.hit, e);
 });
+
+// 悬停提示：贴纸名（没有就 #编号）+ 包名。同样按透明度找是哪一张，撕走的格子也报得出来
+const tipEl = $('#tip');
+let tipRef = null;
+function hideTip() { tipEl.hidden = true; tipRef = null; }
+stripsEl.addEventListener('pointermove', e => {
+  if (drag || e.buttons) return hideTip();
+  const found = slotHitAt(e.clientX, e.clientY, { skipUsed: false });
+  if (!found) return hideTip();
+  const s = found.slot;
+  if (s.ref !== tipRef) {
+    tipRef = s.ref;
+    tipEl.innerHTML = '<b></b><span></span>';
+    tipEl.querySelector('b').textContent = s.label;
+    tipEl.querySelector('span').textContent = s.packName;
+  }
+  tipEl.hidden = false;
+  const r = tipEl.getBoundingClientRect();
+  tipEl.style.left = Math.min(e.clientX + 14, innerWidth - r.width - 8) + 'px';
+  tipEl.style.top = Math.min(e.clientY + 16, innerHeight - r.height - 8) + 'px';
+});
+stripsEl.addEventListener('pointerleave', hideTip);
 
 // 快照不在这里打，等真的揭下来那一刻（pickUp 之前）再打：撕到一半放弃不算一次改动，也不该清掉重做栈。
 // 撕纸层按屏幕像素画（w/h/c/grab 都是屏幕量）；捏点另存一份世界局部坐标（除以 k）给 pickUp 定位用
