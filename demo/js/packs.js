@@ -11,6 +11,16 @@ export const LIMITS = { fileBytes: 32 * 1024 * 1024, entries: 2000, packBytes: 3
 // 旧安装器装的记录缺这些字段，启动时自动重装一次；文件没变的不重下
 export const INSTALLER = 2;
 
+// 安装 / 卸载 / 回收互斥：同一标签页串成一条链，跨标签页再用 Web Locks。
+// 回收只认已提交的包，进行中的安装写了 blob 还没写 packs 记录，这时回收会把它删掉
+let chain = Promise.resolve();
+function exclusive(fn) {
+  const run = () => (navigator.locks?.request ? navigator.locks.request('petalpop-packs', fn) : fn());
+  const p = chain.then(run, run);
+  chain = p.catch(() => {});
+  return p;
+}
+
 const IMAGE_EXT = /\.(png|jpe?g|webp|gif)$/i;
 const AUDIO_EXT = /\.(mp3|ogg|m4a)$/i;
 const ID_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/;
@@ -67,8 +77,8 @@ export async function resolveSource(src) {
   };
 }
 
-async function fetchFile(res, file) {
-  const opts = res.lock ? {} : { cache: 'no-cache' };
+async function fetchFile(res, file, signal) {
+  const opts = { ...(res.lock ? {} : { cache: 'no-cache' }), signal };
   let r = await fetch(res.base + file, opts);
   for (const b of res.fallbackBases || []) {
     if (r.ok) break;
@@ -96,7 +106,7 @@ export function validateManifest(json) {
     if (typeof e.id !== 'string' || !ID_RE.test(e.id)) throw new Error(`${at} 缺少合法 id（每个条目必须声明稳定的 id）`);
     if (seen.has(e.id)) throw new Error(`条目 id 重复: ${e.id}`);
     seen.add(e.id);
-    if (!(e.type in TYPES)) throw new Error(`${at}(${e.id}) 类型不认识: ${e.type}`);
+    if (!Object.hasOwn(TYPES, e.type)) throw new Error(`${at}(${e.id}) 类型不认识: ${e.type}`);
     if (typeof e.file !== 'string' || !e.file || e.file.startsWith('/') || e.file.split('/').includes('..')) throw new Error(`${at}(${e.id}) file 不合法`);
     const kind = TYPES[e.type];
     if (kind === 'image' && !IMAGE_EXT.test(e.file)) throw new Error(`${e.id}: 图片只收 png/jpg/webp/gif（不收 svg）`);
@@ -154,18 +164,25 @@ async function verifyBlob(blob, kind, entry) {
   return {};
 }
 
+// n 个 worker 分食任务；一个失败就不再取新任务、中断其余下载（signal），等全部退出后再抛
 export async function pool(items, n, fn) {
-  let i = 0;
+  let i = 0, failed = null;
+  const ac = new AbortController();
   await Promise.all(Array.from({ length: n }, async () => {
-    while (i < items.length) await fn(items[i++]);
+    while (i < items.length && !failed) {
+      try { await fn(items[i++], ac.signal); }
+      catch (e) { if (!failed) { failed = e; ac.abort(); } }
+    }
   }));
+  if (failed) throw failed;
 }
 
 // ---------- 安装（原子）----------
 // 1. 解析来源、钉死版本  2. 拉清单、校验  3. 全部文件下载 + 体检 + 对 sha256，按哈希写入 blobs
 // 4. 全部成功后才写 packs 记录（这一步就是“翻转”）。中途失败：旧版本记录原样保留，
 //    已写入的 blobs 是孤儿，垃圾回收会收走。
-export async function installPack(text, onProgress = () => {}) {
+export const installPack = (text, onProgress) => exclusive(() => doInstall(text, onProgress));
+async function doInstall(text, onProgress = () => {}) {
   const src = parseSource(text);
   onProgress({ phase: 'resolve' });
   const res = await resolveSource(src);
@@ -188,7 +205,7 @@ export async function installPack(text, onProgress = () => {}) {
   let done = 0, bytes = 0;
   const entries = new Array(total);
   const known = new Map((existing?.entries || []).map(e => [e.sha256, e]));
-  await pool(man.entries.map((e, i) => [e, i]), 6, async ([e, i]) => {
+  await pool(man.entries.map((e, i) => [e, i]), 6, async ([e, i], signal) => {
     // 增量更新：清单写了哈希、这份字节上次已经体检过并存在库里，就不用再下载
     const prev = e.sha256 && known.get(e.sha256);
     if (prev && await DB.has('blobs', e.sha256)) {
@@ -197,7 +214,7 @@ export async function installPack(text, onProgress = () => {}) {
       onProgress({ phase: 'files', done: ++done, total, bytes });
       return;
     }
-    const r = await fetchFile(res, e.file);
+    const r = await fetchFile(res, e.file, signal);
     if (!r.ok) throw new Error(`下载失败 ${e.file}（HTTP ${r.status}）`);
     const blob = await r.blob();
     if (blob.size > LIMITS.fileBytes) throw new Error(`${e.file} 超过单文件上限 32MB`);
@@ -224,13 +241,11 @@ export async function installPack(text, onProgress = () => {}) {
 
 export const listPacks = () => DB.getAll('packs');
 
-export async function uninstallPack(id) {
-  await DB.del('packs', id);
-  return gc();
-}
+export const uninstallPack = id => exclusive(async () => { await DB.del('packs', id); return sweep(); });
 
-// 垃圾回收：从已安装清单出发找可达哈希，其余 blobs 全删
-export async function gc() {
+// 垃圾回收：从已安装清单出发找可达哈希，其余 blobs 全删（和安装互斥，见 exclusive）
+export const gc = () => exclusive(sweep);
+async function sweep() {
   const packs = await DB.getAll('packs');
   const live = new Set();
   for (const p of packs) for (const e of p.entries) live.add(e.sha256);
@@ -257,13 +272,17 @@ export async function storageInfo() {
 }
 
 // ---------- Blob → 对象地址（懒加载 + 缓存） ----------
+// 缓存里存地址或进行中的 Promise：并发要同一个哈希时不重复读库、不重复建地址。库里没有的不缓存（装上后能再试）
 const urlCache = new Map();
-export async function urlFor(hash) {
-  if (urlCache.has(hash)) return urlCache.get(hash);
-  const blob = await DB.get('blobs', hash);
-  if (!blob) return null;
-  const u = URL.createObjectURL(blob);
-  urlCache.set(hash, u);
-  return u;
+export function urlFor(hash) {
+  if (urlCache.has(hash)) return Promise.resolve(urlCache.get(hash));
+  const p = DB.get('blobs', hash).then(blob => {
+    if (!blob) { urlCache.delete(hash); return null; }
+    const u = URL.createObjectURL(blob);
+    urlCache.set(hash, u);
+    return u;
+  }, e => { urlCache.delete(hash); throw e; });
+  urlCache.set(hash, p);
+  return p;
 }
-export const urlSync = hash => urlCache.get(hash) || null;
+export const urlSync = hash => { const v = urlCache.get(hash); return typeof v === 'string' ? v : null; };
