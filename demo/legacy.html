@@ -4,8 +4,6 @@
 <meta charset="utf-8">
 <title>花漾贴贴 Petal Pop</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=DotGothic16&display=swap" rel="stylesheet">
 <link href="https://cdnjs.cloudflare.com/ajax/libs/remixicon/4.2.0/remixicon.min.css" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
 </head>
@@ -16,7 +14,7 @@
   <aside id="side">
     <div class="side-head">
       <span class="side-title">素材包</span>
-      <button id="btn-side-toggle" class="px-btn sm" title="收起 / 展开"><i class="ri-side-bar-line"></i></button>
+      <button id="btn-side-toggle" class="btn icon" title="收起 / 展开"><i class="ri-side-bar-line"></i></button>
     </div>
     <div id="side-body">
       <!-- 分类：按包的内容推导——有贴纸的算「贴纸」，只有本子/桌面/音乐/皮肤的算「美化」 -->
@@ -39,16 +37,16 @@
 
   <main id="center">
     <div id="topbar">
-      <button id="btn-bgm" class="px-btn" title="音乐开关"><i class="ri-music-2-line"></i><span>音乐</span></button>
-      <button id="btn-board" class="px-btn" title="换一块底板"><i class="ri-book-2-line"></i><span>换本子</span></button>
-      <button id="btn-bg" class="px-btn" title="换桌面"><i class="ri-landscape-line"></i><span>换桌面</span></button>
-      <button id="btn-skin" class="px-btn" title="换一套界面皮肤"><i class="ri-palette-line"></i><span>换皮肤</span></button>
-      <button id="btn-undo" class="px-btn" title="上一步 (Ctrl+Z)"><i class="ri-arrow-go-back-line"></i><span>上一步</span></button>
-      <button id="btn-redo" class="px-btn" title="下一步 (Ctrl+Y)"><i class="ri-arrow-go-forward-line"></i><span>下一步</span></button>
-      <button id="btn-clear" class="px-btn" title="全部撕掉"><i class="ri-eraser-line"></i><span>清空</span></button>
+      <button id="btn-bgm" class="btn" title="音乐开关"><i class="ri-music-2-line"></i><span>音乐</span></button>
+      <button id="btn-board" class="btn" title="换一块底板"><i class="ri-book-2-line"></i><span>换本子</span></button>
+      <button id="btn-bg" class="btn" title="换桌面"><i class="ri-landscape-line"></i><span>换桌面</span></button>
+      <button id="btn-skin" class="btn" title="换一套界面皮肤"><i class="ri-palette-line"></i><span>换皮肤</span></button>
+      <button id="btn-undo" class="btn" title="上一步 (Ctrl+Z)"><i class="ri-arrow-go-back-line"></i><span>上一步</span></button>
+      <button id="btn-redo" class="btn" title="下一步 (Ctrl+Y)"><i class="ri-arrow-go-forward-line"></i><span>下一步</span></button>
+      <button id="btn-clear" class="btn" title="全部撕掉"><i class="ri-eraser-line"></i><span>清空</span></button>
       <span id="zoom-readout" class="dim zoom-readout" title="画布缩放：滚轮以鼠标为中心缩放，拖空白处平移">100%</span>
-      <button id="btn-fit" class="px-btn" title="整张桌面放进窗口"><i class="ri-fullscreen-line"></i><span>适应窗口</span></button>
-      <button id="btn-settings" class="px-btn" title="设置"><i class="ri-settings-3-line"></i><span>设置</span></button>
+      <button id="btn-fit" class="btn" title="整张桌面放进窗口"><i class="ri-fullscreen-line"></i><span>适应窗口</span></button>
+      <button id="btn-settings" class="btn" title="设置"><i class="ri-settings-3-line"></i><span>设置</span></button>
     </div>
 
     <!-- 视口：只有 #world 一个 transform（平移 + 缩放），里面全是 1672×941 的世界坐标 -->
@@ -63,7 +61,7 @@
         <!-- 贴在桌面上的贴纸层 -->
         <div id="layer"></div>
       </div>
-      <div id="toast" class="px-box"></div>
+      <div id="toast" class="card"></div>
     </div>
   </main>
 
@@ -76,10 +74,10 @@
 
 <!-- 设置 -->
 <div id="modal" class="modal" hidden>
-  <div class="px-box modal-card">
+  <div class="card modal-card">
     <div class="modal-head">
       <span>设置</span>
-      <button id="btn-close" class="px-btn sm" title="关闭"><i class="ri-close-line"></i></button>
+      <button id="btn-close" class="btn icon" title="关闭"><i class="ri-close-line"></i></button>
     </div>
     <div class="tabs">
       <button class="tab on" data-tab="skins"><i class="ri-palette-line"></i>皮肤</button>
@@ -96,8 +94,8 @@
     <section data-pane="save" hidden>
       <p>存档里只有贴纸的位置和引用，不含图片。换电脑时导出这份文件，装上同样的素材包再导入即可复原。</p>
       <div class="btn-row">
-        <button id="btn-export" class="px-btn"><i class="ri-download-2-line"></i>导出存档</button>
-        <button id="btn-import" class="px-btn"><i class="ri-upload-2-line"></i>导入存档</button>
+        <button id="btn-export" class="btn"><i class="ri-download-2-line"></i>导出存档</button>
+        <button id="btn-import" class="btn"><i class="ri-upload-2-line"></i>导入存档</button>
         <input id="import-file" type="file" accept="application/json,.json" hidden>
       </div>
     </section>
@@ -105,8 +103,8 @@
     <section data-pane="storage" hidden>
       <p id="storage-info" class="storage-info">…</p>
       <div class="btn-row">
-        <button id="btn-gc" class="px-btn sm" title="删掉没有任何包引用的文件"><i class="ri-brush-2-line"></i>清理无引用文件</button>
-        <button id="btn-wipe" class="px-btn sm danger" title="删除本站点所有本地数据"><i class="ri-delete-bin-2-line"></i>清空全部本地数据</button>
+        <button id="btn-gc" class="btn icon" title="删掉没有任何包引用的文件"><i class="ri-brush-2-line"></i>清理无引用文件</button>
+        <button id="btn-wipe" class="btn danger" title="删除本站点所有本地数据"><i class="ri-delete-bin-2-line"></i>清空全部本地数据</button>
       </div>
       <div class="dim modal-help">素材按内容去重存在浏览器的 IndexedDB 里。卸载素材包后点“清理”可释放空间。</div>
     </section>
@@ -119,7 +117,7 @@
 
 <!-- 加载 / 安装遮罩 -->
 <div id="loading">
-  <div class="px-box load-card">
+  <div class="card load-card">
     <div class="load-title">花漾贴贴</div>
     <div class="load-sub" id="load-text">启动中…</div>
     <div class="bar-wrap"><div id="bar"></div></div>

@@ -175,7 +175,7 @@ python tools/locate-on-sheet.py packs/my-pack 原图.png
 
 ## 11. 界面皮肤（`skin` / `skin-asset`）
 
-皮肤改的是**系统界面**——工具栏、贴纸纸卡片、设置弹窗、提示条、加载页——不是桌面和本子（那两个是 `background` / `board`）。
+皮肤改的是**系统界面**——三栏外壳、工具行、贴纸条的纸、设置弹窗、提示条、加载页——不是桌面和本子（那两个是 `background` / `board`）。
 一个包可以带任意个皮肤；纯皮肤包（只有 `skin` 和 `skin-asset` 条目）和贴纸包附带皮肤都行。玩家在工具栏「换皮肤」循环切换，或在设置页「皮肤」里选；同一时间只有一套生效，"默认主题"本身是一个选项。
 
 ### skin.json
@@ -186,17 +186,13 @@ python tools/locate-on-sheet.py packs/my-pack 原图.png
   "name": "海盐蓝",
   "preview": "preview",
   "colors": {
-    "ink": "#2f3f5f", "paper": "#eef3ff", "pink": "#8fb8ff", "pinkDeep": "#4b7bd6",
-    "shadow": "rgba(30,50,90,.35)", "pageBg": "#16202e", "stageBg": "#7f97b8", "overlay": "rgba(10,20,40,.55)",
-    "glow": "#ffffff", "onAccent": "#ffffff",
-    "btnHover": "#dde8ff", "btnDangerHover": "#ffd6d6", "inputFocus": "#e8f0ff",
-    "tabOnBg": "#ffffff", "packRowBg": "#ffffff",
-    "barTrack": "#ffffff", "barFill": "#8fb8ff", "barFillDeep": "#4b7bd6",
-    "sheetGrad1": "#dbe8ff", "sheetGrad2": "#c4d8f7", "sheetGrad3": "#adc6ee",
-    "sheetDotColor": "rgba(255,255,255,.7)", "sheetDotSmColor": "rgba(255,255,255,.4)", "sheetDashColor": "rgba(255,255,255,.9)"
+    "bg": "#eef3ff", "panel": "#eef3ff", "panel2": "#dbe4f7", "line": "transparent", "input": "#ffffff",
+    "fg": "#2f3f5f", "dim": "#6b7a99", "dim2": "#93a0bb", "accent": "#4b7bd6", "onAccent": "#ffffff", "danger": "#e5484d",
+    "shadow": "rgba(30,50,90,.18)", "overlay": "rgba(20,30,60,.45)",
+    "stageBg": "#7f97b8", "deskShadow": "rgba(30,50,90,.35)",
+    "stripPaper": "#dbe8ff", "stripPaper2": "#adc6ee", "stripDot": "rgba(255,255,255,.7)", "stripCut": "rgba(255,255,255,.8)"
   },
   "textures": { "sheetPaper": "paper-tex", "box": "paper-tex", "button": null, "modal": null, "toast": null, "loading": null },
-  "sheet": { "dotPattern": false, "dashedBorder": true, "borderRadius": 10 },
   "font": null
 }
 ```
@@ -206,9 +202,8 @@ python tools/locate-on-sheet.py packs/my-pack 原图.png
 | `skinVersion` | 必需，整数。比播放器认识的新就拒绝安装 |
 | `name` | 显示名，最长 60 字 |
 | `preview` | 同包一个 `skin-asset` 的条目 id，设置页当缩略图（建议 120×90）。不写就用 ink / paper / pink 三色拼一个色块 |
-| `colors.*` | 每个键对应界面上的一种取色（`ink` 描边和文字、`paper` 盒子底、`pink` 强调、`pinkDeep` 深强调、`shadow` 硬阴影、`pageBg` 页面底、`stageBg` 桌面兜底色、`overlay` 弹窗遮罩、`glow` 盒子内圈亮边、`onAccent` 强调色上的文字、`btnHover` 等悬停/聚焦色、`sheet*` 贴纸纸渐变三色和波点/虚线色）。不认识的键忽略 |
-| `textures.*` | 纹理槽位，值是同包 `skin-asset` 的条目 id。`sheetPaper` 贴纸纸底；`box` 所有盒子（弹窗、提示条、加载卡）；`button` 按钮；`modal` / `toast` / `loading` 单独覆盖对应的盒子，不写就用 `box` |
-| `sheet` | `dotPattern` / `dashedBorder`：布尔，关掉贴纸纸的波点 / 虚线框；`borderRadius`：0～64 的整数（像素） |
+| `colors.*` | 每个键对应外壳上的一种取色：`bg` 页面底、`panel` 三栏和弹窗的面板底、`panel2` 面板上再高一层（悬停、条头）、`line` 分隔线（默认透明）、`input` 输入框和列表行底、`fg` 文字、`dim` / `dim2` 次要文字两档、`accent` 强调色（选中、主按钮）、`onAccent` 强调色上的文字、`danger` 危险操作、`shadow` 浮层软阴影、`overlay` 弹窗遮罩、`stageBg` 桌面没有背景图时的兜底色、`deskShadow` 本子压在桌上的硬阴影、`stripPaper` / `stripPaper2` 贴纸条纸的渐变两端、`stripDot` 波点、`stripCut` 撕走后的刀模空位、`t1`～`t5` 分类 chip 的色调。不认识的键忽略 |
+| `textures.*` | 纹理槽位，值是同包 `skin-asset` 的条目 id。`sheetPaper` 贴纸条的纸（替换渐变，波点仍在）；`box` 所有卡片（弹窗、提示条、加载卡）；`button` 按钮；`modal` / `toast` / `loading` 单独覆盖对应的卡片，不写就用 `box` |
 | `font` | 字体名列表字符串（如 `"Zpix", "Microsoft YaHei", sans-serif`）。**只用玩家机器上已有的字体，不会加载远程字体** |
 
 所有字段可选；`null` 或不写 = 保持默认；不认识的字段忽略。
@@ -217,14 +212,14 @@ python tools/locate-on-sheet.py packs/my-pack 原图.png
 
 皮肤是第三方内容，播放器只接受能一眼看穿的字面量：
 
-- 颜色：`#rgb` `#rgba` `#rrggbb` `#rrggbbaa`，或 `rgb()` `rgba()` `hsl()` `hsla()` 且括号里只有数字、`.`、`%`、空格、逗号、`/`。
+- 颜色：`#rgb` `#rgba` `#rrggbb` `#rrggbbaa`，或 `rgb()` `rgba()` `hsl()` `hsla()` 且括号里只有数字、`.`、`%`、空格、逗号、`/`；另外接受字面量 `transparent`（`line` 用）。
   `var(--x)`、`url(...)`、`calc()`、颜色名（`red`）都不收——不是因为它们危险与否，而是只有字面量才能保证它们**只会被当成颜色**。
 - 不合法的值单独丢弃并在控制台说明（设置页会标"N 处配置被忽略"），不影响其余字段、不影响安装。
 - 皮肤名等文字按纯文本显示，不解析 HTML。
 
 ### 纹理的约定
 
-- 纹理**只替换底层**：贴纸纸的波点、虚线框仍由 `sheet.*` 控制；盒子的描边、阴影、内圈亮边仍由 `colors.*` 控制。
+- 纹理**只替换底层**：贴纸条的波点仍在（颜色由 `stripDot` 控制）；卡片的圆角、阴影仍由外壳样式控制。
 - 按原尺寸**平铺**，1 图片像素 = 1 舞台逻辑像素，最近邻采样（像素风不糊）。所以纹理做成能无缝拼接的小块（64～256 见方）最合适；整幅插画当面板底不在 v1 的目标里。
 - 最长边不超过 2048 像素。
 
@@ -232,6 +227,7 @@ python tools/locate-on-sheet.py packs/my-pack 原图.png
 
 - 切换即时生效、不刷新页面；从皮肤 A 切到只写了部分字段的皮肤 B，B 没写的字段回到默认，不会残留 A 的值。
 - 皮肤所在的包被禁用或卸载：界面回到默认主题，但玩家的选择保留着，包装回来自动恢复（和底板、桌面一样）。
+- 早期草案里的 `sheet` 字段（贴纸纸的波点开关、圆角）已取消——贴纸纸变成了右栏的贴纸条；写了会被忽略并在控制台提示。
 - 上次的颜色会记在本机（localStorage），下次打开时在读素材包之前就先刷上，加载页不会先闪一下默认色。
 
 ### 目前要手写清单
