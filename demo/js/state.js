@@ -1,6 +1,6 @@
 // 游戏状态：装机清单 + 作品列表 + 设置。
 // 规矩：画面永远从这里算出来；改状态只走 apply(action)；读旧存档走 normalize()。
-export const STATE_VERSION = 5;   // 5：加 ui（相机、面板折叠），不进撤销
+export const STATE_VERSION = 6;   // 6：桌面背景锁死，能缩放的是本子（project.boardZ）；ui 里换成两个浮层面板的开关
 const DEFAULT_PACK = 'petalpop-default';
 
 // 本子默认摆在桌面中央。贴纸和本子都是原始大小，不缩放、不翻转。
@@ -11,8 +11,9 @@ const BOARD_START = { x: 836, y: 470 };
 const clamp = (v, [lo, hi]) => Math.min(hi, Math.max(lo, v));
 const r2 = v => +(+v).toFixed(2);
 
+// boardZ：本子（画布）的缩放。桌面背景是锁死的，放大缩小只作用在本子身上，所以它是作品的一部分、跟着作品走
 export function makeProject(id, name) {
-  return { id, name, board: null, background: null, boardT: { ...BOARD_START }, seq: 1, items: [] };
+  return { id, name, board: null, background: null, boardT: { ...BOARD_START }, boardZ: 1, seq: 1, items: [] };
 }
 
 export function makeState() {
@@ -22,17 +23,17 @@ export function makeState() {
     projects: { p1: makeProject('p1', '我的本子') },
     settings: { bgm: true, bgmRef: null, volume: 0.5, skinRef: null },
     packs: {},          // 包 id → { enabled, order }
-    ui: { cam: null, sideCollapsed: false, strips: {} },   // 视角和面板状态：跟作品无关，撤销不管它
+    ui: { sideOpen: true, stripsOpen: true, strips: {} },   // 面板开关：跟作品无关，撤销不管它
   };
 }
 
-const ZOOM = [0.25, 4];
+export const ZOOM = [0.25, 4];
 function normUi(u) {
-  const ui = { cam: null, sideCollapsed: false, strips: {}, ...(u && typeof u === 'object' ? u : {}) };
-  const c = ui.cam;
-  ui.cam = c && Number.isFinite(c.x) && Number.isFinite(c.y) && Number.isFinite(c.z) && c.z >= ZOOM[0] && c.z <= ZOOM[1]
-    ? { x: c.x, y: c.y, z: c.z } : null;
-  ui.sideCollapsed = !!ui.sideCollapsed;
+  const ui = { sideOpen: true, stripsOpen: true, strips: {}, ...(u && typeof u === 'object' ? u : {}) };
+  delete ui.cam;              // v5 的相机：背景锁死之后没有相机了
+  delete ui.sideCollapsed;    // v5 的左栏折叠：换成 sideOpen
+  ui.sideOpen = ui.sideOpen !== false;
+  ui.stripsOpen = ui.stripsOpen !== false;
   ui.strips = Object.fromEntries(Object.entries(ui.strips && typeof ui.strips === 'object' ? ui.strips : {}).map(([k, v]) => [k, { collapsed: !!v?.collapsed }]));
   return ui;
 }
@@ -79,6 +80,7 @@ export function normalize(raw) {
     const t = { ...BOARD_DEFAULT, ...(p.boardT || {}) };
     const oldT = { x: +t.x || BOARD_DEFAULT.x, y: +t.y || BOARD_DEFAULT.y, s: +t.s || 1, flip: !!t.flip };
     p.boardT = { x: oldT.x, y: oldT.y };
+    p.boardZ = clamp(+p.boardZ || 1, ZOOM);
     delete p.sheetT;   // v5 之前贴纸纸是桌上的物件，有位置和页码；现在是右栏的贴纸条，不再存
     p.items = (Array.isArray(p.items) ? p.items : [])
       .filter(i => i && typeof i.ref === 'string')
@@ -150,6 +152,8 @@ export function apply(state, a) {
     case 'setBoard': p.board = a.ref; return;
     case 'setBackground': p.background = a.ref; return;
     case 'boardMove': p.boardT.x = r2(a.x); p.boardT.y = r2(a.y); return;
+    // 缩放本子不进撤销（调用方走 apply 而不是 commit），但作品快照里带着它，撤销时可能被一起还原——可以接受
+    case 'boardZoom': p.boardZ = +clamp(+a.z || 1, ZOOM).toFixed(4); return;
     case 'setSetting': Object.assign(state.settings, a.patch); return;
     case 'setUi': Object.assign(state.ui, a.patch); return;
     case 'setStripUi': state.ui.strips[a.id] = { ...(state.ui.strips[a.id] || {}), ...a.patch }; return;

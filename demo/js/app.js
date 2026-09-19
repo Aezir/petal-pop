@@ -15,44 +15,47 @@ const STAGE_W = 1672, STAGE_H = 941;
 const DEFAULT_SOURCES = ['local:packs/default', 'Aezir/petal-pop-assets'];
 const $ = s => document.querySelector(s);
 
-const appEl = $('#app'), viewport = $('#viewport'), world = $('#world'), zoomReadout = $('#zoom-readout'), stripsEl = $('#strips'),
-      layer = $('#layer'), boardWrap = $('#boardWrap'), boardEl = $('#board'),
+const viewport = $('#viewport'), world = $('#world'), zoomReadout = $('#zoom-readout'), stripsEl = $('#strips'), sideEl = $('#side'),
+      topbar = $('#topbar'), layer = $('#layer'), boardWrap = $('#boardWrap'), boardEl = $('#board'),
       boardLayer = $('#boardLayer'), toast = $('#toast'), audio = $('#bgm'), loading = $('#loading'), loadText = $('#load-text'),
       bar = $('#bar'), modal = $('#modal'), packList = $('#pack-list');
 
 // 撕贴纸用的 WebGL 层；浏览器不支持 WebGL 时为 null，贴纸从边缘按下就直接拿起
 const peeler = createPeeler($('#peel'));
 
-// ---------- 视口相机 ----------
-// 世界层只有一个 transform：屏幕 = 世界 × z + (x, y)。滚轮以鼠标为中心缩放，拖空白处平移。
-// 相机存在 state.ui.cam（不进撤销）。撕纸层是屏幕坐标、盖满窗口，只在窗口 resize 时重设
+// ---------- 桌面（锁死）与本子（能缩放） ----------
+// 桌面背景是锁死的：#world 铺满整个窗口（cover：按长边贴合、居中、多出来的部分裁掉），
+// 只有窗口大小会改变 fit，玩家怎么操作都不动它。工具行和两个面板浮在它上面，开合不挤压画面。
+// 能放大缩小的是本子（画布）：#boardWrap 的 scale(boardZ)，存在 project.boardZ 里。
 const ZMIN = 0.25, ZMAX = 4;
 const clampZ = z => Math.min(ZMAX, Math.max(ZMIN, z));
-let cam = { x: 0, y: 0, z: 1 };
-function applyCam() {
-  world.style.transform = `translate(${cam.x}px,${cam.y}px) scale(${cam.z})`;
-  zoomReadout.textContent = Math.round(cam.z * 100) + '%';
-  apply(state, { type: 'setUi', patch: { cam: { ...cam } } });
-  save();
+// fit = 每桌面单位多少屏幕像素；fitX/fitY 是世界层左上角在窗口里的位置（cover 时通常是负的）
+let fit = 1, fitX = 0, fitY = 0;
+function applyFit() {
+  const vw = innerWidth, vh = innerHeight;
+  fit = Math.max(vw / STAGE_W, vh / STAGE_H);
+  fitX = (vw - STAGE_W * fit) / 2;
+  fitY = (vh - STAGE_H * fit) / 2;
+  world.style.transform = `translate(${fitX}px,${fitY}px) scale(${fit})`;
 }
-function zoomAt(clientX, clientY, factor) {
-  const r = viewport.getBoundingClientRect(), px = clientX - r.left, py = clientY - r.top;
-  const z1 = clampZ(cam.z * factor), k = z1 / cam.z;
-  cam = { x: px - (px - cam.x) * k, y: py - (py - cam.y) * k, z: z1 };   // 鼠标下的那个世界点不动
-  applyCam();
+const boardZ = () => project(state).boardZ;
+function syncZoom() { zoomReadout.textContent = Math.round(boardZ() * 100) + '%'; }
+// 滚轮缩放本子：把鼠标底下那个「本子上的点」钉住不动。本子锚点在中心，所以缩放同时要挪 boardT。
+// 走 apply 不走 commit：缩放不是对作品的改动，不打快照、不清重做栈
+function boardZoomAt(clientX, clientY, factor) {
+  const p = project(state), z0 = p.boardZ, z1 = clampZ(z0 * factor);
+  if (Math.abs(z1 - z0) < 1e-6) return;
+  const pt = toStage({ clientX, clientY });                                  // 鼠标处的桌面坐标（不会变）
+  const l = { x: (pt.x - p.boardT.x) / z0, y: (pt.y - p.boardT.y) / z0 };    // 它落在本子上的哪一点
+  apply(state, { type: 'boardZoom', z: z1 });
+  apply(state, { type: 'boardMove', x: pt.x - l.x * p.boardZ, y: pt.y - l.y * p.boardZ });
+  syncZoom(); save(); paint();
 }
-function fit() {   // 整张桌面居中放进视口
-  const vw = viewport.clientWidth, vh = viewport.clientHeight;
-  const z = clampZ(Math.min(vw / STAGE_W, vh / STAGE_H));
-  cam = { z, x: (vw - STAGE_W * z) / 2, y: (vh - STAGE_H * z) / 2 };
-  applyCam();
-}
-function initCam() {
-  if (state.ui.cam) { cam = { ...state.ui.cam }; applyCam(); } else fit();
-  new ResizeObserver(() => applyCam()).observe(viewport);   // 左栏折叠、窗口变化：相机不动，只是重画
-}
-addEventListener('resize', () => peeler?.resize());
+addEventListener('resize', () => { applyFit(); peeler?.resize(); });
+applyFit();
 peeler?.resize();
+// 工具行换行会变高，两个面板要跟着往下让
+new ResizeObserver(() => viewport.style.setProperty('--bar-h', topbar.offsetHeight + 'px')).observe(topbar);
 
 // ---------- 状态 ----------
 let state = normalize(await DB.get('kv', 'state').catch(() => null));
@@ -61,8 +64,8 @@ function save() {
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => DB.put('kv', 'state', state).catch(console.warn), 150);
 }
-initCam();
-syncSide();
+syncZoom();
+syncPanels();
 
 // ---------- 素材包索引 ----------
 let installed = [];          // 已安装（DB 里的记录）
@@ -141,6 +144,7 @@ const usedRefs = () => new Set(project(state).items.map(i => i.ref));
 function paint() {
   strips.render(enabledPacks, usedRefs());
   renderer.render(state, view(), sel);
+  syncZoom();   // 撤销/导入存档可能把 boardZ 一起换掉，读数跟着状态走
 }
 async function render() {
   await ensureUrls();
@@ -182,24 +186,21 @@ function syncHistoryButtons() {
 }
 
 // ---------- 坐标 ----------
-// 屏幕（client 像素）⇄ 世界（舞台坐标）。世界层的 transform 就是相机，所以直接量它的矩形
-function toStage(e) {
-  const r = world.getBoundingClientRect();
-  return { x: (e.clientX - r.left) / cam.z, y: (e.clientY - r.top) / cam.z };
-}
-function toScreen(pt) {
-  const r = world.getBoundingClientRect();
-  return { x: r.left + pt.x * cam.z, y: r.top + pt.y * cam.z };
-}
+// 两套坐标：桌面坐标（1672×941 的世界，屏幕 = 桌面 × fit + fitX/fitY）和本子局部坐标（以本子中心为原点，屏幕 = ... × fit × boardZ）。
+// 存档里 on:'desk' 的贴纸用桌面坐标，on:'board' 的用本子局部坐标。
+const toStage = e => ({ x: (e.clientX - fitX) / fit, y: (e.clientY - fitY) / fit });
+const toScreen = pt => ({ x: fitX + pt.x * fit, y: fitY + pt.y * fit });
 function inside(el, e) {
+  if (el.hidden) return false;
   const r = el.getBoundingClientRect();
   return e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
 }
-// 舞台坐标 ⇄ 本子局部坐标（以本子中心为原点）
-const stageToLocal = (pt, t) => ({ x: pt.x - t.x, y: pt.y - t.y });
-const localToStage = (pt, t) => ({ x: t.x + pt.x, y: t.y + pt.y });
-const itemStagePos = (it, t) => (it.on === 'board' ? localToStage(it, t) : { x: it.x, y: it.y });
+// 桌面坐标 ⇄ 本子局部坐标：本子挪了（boardT）也缩放了（boardZ），两边都要算
+const stageToBoard = (pt, p) => ({ x: (pt.x - p.boardT.x) / p.boardZ, y: (pt.y - p.boardT.y) / p.boardZ });
+const boardToStage = (pt, p) => ({ x: p.boardT.x + pt.x * p.boardZ, y: p.boardT.y + pt.y * p.boardZ });
 const overBoard = e => !boardWrap.hidden && inside(boardEl, e);
+// 浮层（工具行、两个面板、弹窗）上的指针事件不算点在桌面上
+const overUi = e => !!e.target?.closest?.('#topbar,#side,#strips,.modal,#loading');
 // 舞台上的一段位移 → 贴纸自身坐标（去掉贴纸的旋转，y 向下）
 function unrotate(dx, dy, rot) {
   const r = -rot * Math.PI / 180, c = Math.cos(r), s = Math.sin(r);
@@ -209,8 +210,8 @@ function unrotate(dx, dy, rot) {
 // ---------- 命中检测 ----------
 // 画布上的指针事件统一在这里判断点到了谁，从上往下找：桌上的贴纸 → 本子上的贴纸 → 本子。贴纸条上的格子另走 stripsEl 的 pointerdown。
 // 贴纸只认图案本身（透明的角落点不到）；离轮廓边缘近的地方才撕得起来（edge）。
-// 全部在屏幕像素里算：k = 每世界单位多少屏幕像素（画布上 = 相机缩放）。轮廓按显示尺寸建、键里带宽度，
-// 所以边缘热区在任何缩放下手感一致，撕纸层也直接吃这些屏幕量
+// 全部在屏幕像素里算：k = 每世界单位多少屏幕像素（桌上的贴纸 = fit，本子上的 = fit × boardZ，条上的 = 缩略比例）。
+// 轮廓按显示尺寸建、键里带宽度，所以边缘热区在任何缩放下手感一致，撕纸层也直接吃这些屏幕量
 function hitSticker(pt, c, rot, ref, el, k) {
   const h = resolveRef(ref), size = sizeOf(ref);
   const w = (size ? size.w : 110) * k, hh = (size ? size.h : 110) * k;   // 缺图的占位块是 110×110
@@ -223,12 +224,12 @@ function hitSticker(pt, c, rot, ref, el, k) {
 function hitTest(e) {
   const pt = { x: e.clientX, y: e.clientY }, p = project(state), byZ = (a, b) => b.z - a.z;
   for (const it of p.items.filter(i => i.on === 'desk').sort(byZ)) {
-    const hit = hitSticker(pt, toScreen(it), it.rot, it.ref, renderer.node(it.uid), cam.z);
+    const hit = hitSticker(pt, toScreen(it), it.rot, it.ref, renderer.node(it.uid), fit);
     if (hit) return { kind: 'item', uid: it.uid, ...hit };
   }
   if (boardWrap.hidden) return null;
   for (const it of p.items.filter(i => i.on === 'board').sort(byZ)) {
-    const hit = hitSticker(pt, toScreen(localToStage(it, p.boardT)), it.rot, it.ref, renderer.node(it.uid), cam.z);
+    const hit = hitSticker(pt, toScreen(boardToStage(it, p)), it.rot, it.ref, renderer.node(it.uid), fit * p.boardZ);
     if (hit) return { kind: 'item', uid: it.uid, ...hit };
   }
   return inside(boardEl, e) ? { kind: 'board' } : null;
@@ -239,18 +240,19 @@ const cursorFor = hit => !hit ? '' : hit.kind === 'board' ? 'move' : hit.edge ? 
 // drag = { kind:'peel', src, handle, start }            正在从边缘揭起，还没离开
 // drag = { kind:'hold', uid, dx, dy, handle, unrolling } 整张拿在手上，跟着手走
 // drag = { kind:'board', dx, dy, snapped }              挪本子
-// drag = { kind:'pan', ox, oy, moved }                  拖空白处平移画布；没动过就是"点了一下空白"
 let drag = null;
 let hintAt = 0;
 
 function hintEdge() {   // 按在贴纸中间：真贴纸抠不起来，提示一下
   if (Date.now() - hintAt > 4000) { hintAt = Date.now(); showToast('从贴纸边缘撕起来'); }
 }
+// 浮层上的按下事件到此为止，别被当成"点在桌面上"（贴纸条自己的撕纸那条路在它自己的监听里已经处理过了）
+for (const el of [topbar, sideEl, stripsEl]) el.addEventListener('pointerdown', e => e.stopPropagation());
 viewport.addEventListener('pointerdown', e => {
   if (e.button !== 0 || e.target.closest('button')) return;
   e.preventDefault();
   const hit = hitTest(e), pt = toStage(e), p = project(state);
-  if (!hit) { drag = { kind: 'pan', ox: e.clientX - cam.x, oy: e.clientY - cam.y, moved: false }; return; }
+  if (!hit) { select(null); render(); return; }   // 点空白 = 取消选中（背景锁死，没有平移）
   if (hit.kind === 'board') {
     const t = p.boardT;
     drag = { kind: 'board', dx: t.x - pt.x, dy: t.y - pt.y, snapped: false };   // 快照等真的动了再打：点一下不算改动，不清重做栈
@@ -303,9 +305,10 @@ function pickUp(src, pt, handle) {
   paint();
   const el = renderer.node(uid);
   // 从条上撕下来的那张：交接时从缩略尺寸"弹"到画布上的实际尺寸（独立的 scale 属性，不碰 placeStyle 的 transform）
+  // 刚撕下来的贴纸一律先落在桌面层，显示比例就是 fit；落到本子上要等松手那一刻才换算
   const pop = () => {
-    if (!el || Math.abs(src.k / cam.z - 1) < 0.02) return;
-    el.style.setProperty('--pop-from', src.k / cam.z);
+    if (!el || Math.abs(src.k / fit - 1) < 0.02) return;
+    el.style.setProperty('--pop-from', src.k / fit);
     el.classList.add('pop');
     el.addEventListener('animationend', () => el.classList.remove('pop'), { once: true });
   };
@@ -329,8 +332,9 @@ function settle(d, e) {
     apply(state, { type: 'remove', uids: [d.uid] });
     return;
   }
+  // 拿在手上时贴纸一直用桌面坐标，落到本子上才换算（本子可能被放大缩小过，所以要连 boardZ 一起除）
   const onBoard = overBoard(e), it = findItem(p, d.uid);
-  const pos = onBoard ? stageToLocal(it, p.boardT) : it;
+  const pos = onBoard ? stageToBoard(it, p) : it;
   apply(state, { type: 'move', uid: d.uid, x: pos.x, y: pos.y, on: onBoard ? 'board' : 'desk' });   // 就贴在松手的地方，不做落下动画
 }
 
@@ -341,17 +345,12 @@ function springBack(d) {
 
 addEventListener('pointermove', e => {
   if (!drag) {
-    if (modal.hidden && viewport.contains(e.target)) viewport.style.cursor = cursorFor(hitTest(e));
+    if (!overUi(e) && viewport.contains(e.target)) viewport.style.cursor = cursorFor(hitTest(e));
+    else viewport.style.cursor = '';
     return;
   }
   const pt = toStage(e);
-  if (drag.kind === 'pan') {
-    const nx = e.clientX - drag.ox, ny = e.clientY - drag.oy;
-    if (!drag.moved && Math.hypot(nx - cam.x, ny - cam.y) < 3) return;
-    drag.moved = true;
-    cam = { ...cam, x: nx, y: ny };
-    applyCam();
-  } else if (drag.kind === 'peel') {
+  if (drag.kind === 'peel') {
     const { src, handle, start } = drag;
     const d = unrotate(e.clientX - start.x, e.clientY - start.y, src.rot);   // 屏幕像素
     if (handle.update(d.x, d.y) >= DETACH_AT) { snapshot(); pickUp(src, pt, handle); }
@@ -372,7 +371,6 @@ addEventListener('pointerup', e => {
   const d = drag;
   drag = null;
   viewport.style.cursor = '';
-  if (d.kind === 'pan') { if (!d.moved) { select(null); render(); } return; }
   if (d.kind === 'peel') return springBack(d);
   if (d.kind === 'hold') {
     if (d.unrolling) peeler.flush();   // 还在展平就松手了：立刻交接给普通图片，别等动画
@@ -389,15 +387,17 @@ addEventListener('pointercancel', () => {
   render();
 });
 
-// 滚轮：默认以鼠标为中心缩放画布；按住 R 且指着贴纸时改为转贴纸。撕到一半时不响应
+// 滚轮：默认以鼠标为中心缩放本子（桌面背景不动）；按住 R 且指着贴纸时改为转贴纸。撕到一半时不响应。
+// 滚在浮层面板上就让它自己滚，别去缩放本子
 let rHeld = false;
 viewport.addEventListener('wheel', e => {
+  if (overUi(e)) return;
   e.preventDefault();
   if (drag?.kind === 'peel') return;
   const hit = rHeld ? hitTest(e) : null;
   if (hit?.kind !== 'item') {
     const dy = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaMode === 2 ? e.deltaY * innerHeight : e.deltaY;
-    zoomAt(e.clientX, e.clientY, Math.exp(-dy * 0.0015));
+    boardZoomAt(e.clientX, e.clientY, Math.exp(-dy * 0.0015));
     return;
   }
   const it = findItem(project(state), hit.uid), d = e.deltaY || e.deltaX;
@@ -470,12 +470,26 @@ $('#btn-skin').onclick = async () => {
 };
 $('#btn-undo').onclick = undo;
 $('#btn-redo').onclick = redo;
-$('#btn-fit').onclick = fit;
-function syncSide() { appEl.classList.toggle('side-collapsed', state.ui.sideCollapsed); }
-$('#btn-side-toggle').onclick = () => {
-  apply(state, { type: 'setUi', patch: { sideCollapsed: !state.ui.sideCollapsed } });
-  syncSide(); save();
+// 本子回到 100%：锚点就是本子中心，只改 boardZ 就地缩回去，本子不会跑位
+$('#btn-zoom-reset').onclick = () => {
+  if (Math.abs(boardZ() - 1) < 1e-6) return;
+  apply(state, { type: 'boardZoom', z: 1 });
+  syncZoom(); save(); paint();
 };
+// 两个浮层面板：开合只是盖住 / 让开画面，桌面和本子一动不动
+function syncPanels() {
+  sideEl.hidden = !state.ui.sideOpen;
+  stripsEl.hidden = !state.ui.stripsOpen;
+  $('#btn-side').classList.toggle('on', state.ui.sideOpen);
+  $('#btn-strips').classList.toggle('on', state.ui.stripsOpen);
+}
+function togglePanel(key) {
+  apply(state, { type: 'setUi', patch: { [key]: !state.ui[key] } });
+  syncPanels(); save();
+}
+$('#btn-side').onclick = () => togglePanel('sideOpen');
+$('#btn-strips').onclick = () => togglePanel('stripsOpen');
+$('#btn-side-toggle').onclick = () => togglePanel('sideOpen');
 $('#btn-clear').onclick = () => {
   if (!project(state).items.length) return;
   commit({ type: 'clear' }); select(null); render();

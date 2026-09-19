@@ -9,12 +9,41 @@
 </head>
 <body>
 
-<!-- 三栏：左 图包管理 / 中 工具行 + 画布视口 / 右 贴纸条 -->
-<div id="app">
+<!-- 整个窗口就是那张桌子：背景锁死铺满（#world），工具行和左右两个面板都是浮在它上面的层，开合不挤压画面 -->
+<div id="viewport">
+  <!-- 桌面世界：固定 1672×941，只按窗口大小整体 cover 缩放，不平移、不跟着缩放走 -->
+  <div id="world">
+    <!-- 本子（画布）：wrap 是 0×0 锚点 + scale(boardZ)，贴在本子上的贴纸放在 boardLayer 里跟着一起挪、一起缩放 -->
+    <div id="boardWrap" hidden>
+      <img id="board" alt="board" draggable="false">
+      <div id="boardLayer"></div>
+    </div>
+
+    <!-- 贴在桌面上的贴纸层：只跟窗口 fit 走，本子缩放不影响它 -->
+    <div id="layer"></div>
+  </div>
+
+  <div id="topbar">
+    <button id="btn-side" class="btn" title="素材包面板"><i class="ri-stack-line"></i><span>素材包</span></button>
+    <button id="btn-strips" class="btn" title="贴纸条面板"><i class="ri-price-tag-3-line"></i><span>贴纸条</span></button>
+    <span class="bar-sep"></span>
+    <button id="btn-bgm" class="btn" title="音乐开关"><i class="ri-music-2-line"></i><span>音乐</span></button>
+    <button id="btn-board" class="btn" title="换一块底板"><i class="ri-book-2-line"></i><span>换本子</span></button>
+    <button id="btn-bg" class="btn" title="换桌面"><i class="ri-landscape-line"></i><span>换桌面</span></button>
+    <button id="btn-skin" class="btn" title="换一套界面皮肤"><i class="ri-palette-line"></i><span>换皮肤</span></button>
+    <button id="btn-undo" class="btn" title="上一步 (Ctrl+Z)"><i class="ri-arrow-go-back-line"></i><span>上一步</span></button>
+    <button id="btn-redo" class="btn" title="下一步 (Ctrl+Y)"><i class="ri-arrow-go-forward-line"></i><span>下一步</span></button>
+    <button id="btn-clear" class="btn" title="全部撕掉"><i class="ri-eraser-line"></i><span>清空</span></button>
+    <span class="bar-sep"></span>
+    <span id="zoom-readout" class="dim zoom-readout" title="本子的缩放：滚轮以鼠标为中心放大缩小本子，桌面背景不动">100%</span>
+    <button id="btn-zoom-reset" class="btn" title="本子回到 100%">100%</button>
+    <button id="btn-settings" class="btn" title="设置"><i class="ri-settings-3-line"></i><span>设置</span></button>
+  </div>
+
   <aside id="side">
     <div class="side-head">
       <span class="side-title">素材包</span>
-      <button id="btn-side-toggle" class="btn icon" title="收起 / 展开"><i class="ri-side-bar-line"></i></button>
+      <button id="btn-side-toggle" class="btn icon" title="收起这个面板"><i class="ri-close-line"></i></button>
     </div>
     <div id="side-body">
       <!-- 分类：按包的内容推导——有贴纸的算「贴纸」，只有本子/桌面/音乐/皮肤的算「美化」 -->
@@ -35,39 +64,14 @@
     </div>
   </aside>
 
-  <main id="center">
-    <div id="topbar">
-      <button id="btn-bgm" class="btn" title="音乐开关"><i class="ri-music-2-line"></i><span>音乐</span></button>
-      <button id="btn-board" class="btn" title="换一块底板"><i class="ri-book-2-line"></i><span>换本子</span></button>
-      <button id="btn-bg" class="btn" title="换桌面"><i class="ri-landscape-line"></i><span>换桌面</span></button>
-      <button id="btn-skin" class="btn" title="换一套界面皮肤"><i class="ri-palette-line"></i><span>换皮肤</span></button>
-      <button id="btn-undo" class="btn" title="上一步 (Ctrl+Z)"><i class="ri-arrow-go-back-line"></i><span>上一步</span></button>
-      <button id="btn-redo" class="btn" title="下一步 (Ctrl+Y)"><i class="ri-arrow-go-forward-line"></i><span>下一步</span></button>
-      <button id="btn-clear" class="btn" title="全部撕掉"><i class="ri-eraser-line"></i><span>清空</span></button>
-      <span id="zoom-readout" class="dim zoom-readout" title="画布缩放：滚轮以鼠标为中心缩放，拖空白处平移">100%</span>
-      <button id="btn-fit" class="btn" title="整张桌面放进窗口"><i class="ri-fullscreen-line"></i><span>适应窗口</span></button>
-      <button id="btn-settings" class="btn" title="设置"><i class="ri-settings-3-line"></i><span>设置</span></button>
-    </div>
-
-    <!-- 视口：只有 #world 一个 transform（平移 + 缩放），里面全是 1672×941 的世界坐标 -->
-    <div id="viewport">
-      <div id="world">
-        <!-- 底板（本子）：wrap 承载位置，贴在本子上的贴纸放在 boardLayer 里跟着一起挪 -->
-        <div id="boardWrap" hidden>
-          <img id="board" alt="board" draggable="false">
-          <div id="boardLayer"></div>
-        </div>
-
-        <!-- 贴在桌面上的贴纸层 -->
-        <div id="layer"></div>
-      </div>
-      <div id="toast" class="card"></div>
-    </div>
-  </main>
-
   <!-- 贴纸条：一包一条，strips.js 生成 -->
   <aside id="strips"></aside>
+
+  <div id="toast" class="card"></div>
 </div>
+
+<!-- 贴纸条上的悬停提示：贴纸名 / 编号 + 包名。不用原生 title（慢、没法配色） -->
+<div id="tip" hidden></div>
 
 <!-- 撕贴纸的 WebGL 层：盖满整个窗口、按屏幕像素画，只画正在撕的那一张；不接事件 -->
 <canvas id="peel"></canvas>

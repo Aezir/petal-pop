@@ -64,8 +64,11 @@ export function createRenderer({ stage, layer, boardWrap, boardEl, boardLayer, r
       boardEl.src = urlSync(board.entry.sha256) || '';
       boardEl.dataset.hash = board.entry.sha256;
     }
+    // wrap 是 0×0 的锚点 = 本子中心，所以 scale 绕它自己的原点转就等于绕本子中心缩放；
+    // 本子和贴在本子上的贴纸一起缩放，桌面背景和桌上的贴纸不受影响
     boardWrap.style.left = p.boardT.x + 'px';
     boardWrap.style.top = p.boardT.y + 'px';
+    boardWrap.style.transform = `scale(${p.boardZ})`;
     boardWrap.classList.toggle('selected', sel?.kind === 'board');
   }
 
