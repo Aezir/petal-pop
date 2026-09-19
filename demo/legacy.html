@@ -23,21 +23,22 @@
     <div id="layer"></div>
   </div>
 
+  <!-- 工具行：只有图标，名字走 title。功能一个不少 -->
   <div id="topbar">
-    <button id="btn-side" class="btn" title="素材包面板"><i class="ri-stack-line"></i><span>素材包</span></button>
-    <button id="btn-strips" class="btn" title="贴纸条面板"><i class="ri-price-tag-3-line"></i><span>贴纸条</span></button>
+    <button id="btn-side" class="btn" title="素材包面板"><i class="ri-stack-line"></i></button>
+    <button id="btn-strips" class="btn" title="贴纸条面板"><i class="ri-price-tag-3-line"></i></button>
     <span class="bar-sep"></span>
-    <button id="btn-bgm" class="btn" title="音乐开关"><i class="ri-music-2-line"></i><span>音乐</span></button>
-    <button id="btn-board" class="btn" title="换一块底板"><i class="ri-book-2-line"></i><span>换本子</span></button>
-    <button id="btn-bg" class="btn" title="换桌面"><i class="ri-landscape-line"></i><span>换桌面</span></button>
-    <button id="btn-skin" class="btn" title="换一套界面皮肤"><i class="ri-palette-line"></i><span>换皮肤</span></button>
-    <button id="btn-undo" class="btn" title="上一步 (Ctrl+Z)"><i class="ri-arrow-go-back-line"></i><span>上一步</span></button>
-    <button id="btn-redo" class="btn" title="下一步 (Ctrl+Y)"><i class="ri-arrow-go-forward-line"></i><span>下一步</span></button>
-    <button id="btn-clear" class="btn" title="全部撕掉"><i class="ri-eraser-line"></i><span>清空</span></button>
+    <button id="btn-bgm" class="btn" title="音乐开关"><i class="ri-music-2-line"></i></button>
+    <button id="btn-board" class="btn" title="换一块底板"><i class="ri-book-2-line"></i></button>
+    <button id="btn-bg" class="btn" title="换桌面"><i class="ri-landscape-line"></i></button>
+    <button id="btn-skin" class="btn" title="换一套界面皮肤"><i class="ri-palette-line"></i></button>
     <span class="bar-sep"></span>
-    <span id="zoom-readout" class="dim zoom-readout" title="本子的缩放：滚轮以鼠标为中心放大缩小本子，桌面背景不动">100%</span>
-    <button id="btn-zoom-reset" class="btn" title="本子回到 100%">100%</button>
-    <button id="btn-settings" class="btn" title="设置"><i class="ri-settings-3-line"></i><span>设置</span></button>
+    <button id="btn-undo" class="btn" title="上一步 (Ctrl+Z)"><i class="ri-arrow-go-back-line"></i></button>
+    <button id="btn-redo" class="btn" title="下一步 (Ctrl+Y)"><i class="ri-arrow-go-forward-line"></i></button>
+    <button id="btn-clear" class="btn" title="全部撕掉"><i class="ri-eraser-line"></i></button>
+    <span class="bar-sep"></span>
+    <button id="btn-zoom-reset" class="btn zoom-btn" title="本子的缩放：滚轮以鼠标为中心放大缩小本子，桌面背景不动。点这里回到 100%"><i class="ri-search-line"></i><b id="zoom-readout">100%</b></button>
+    <button id="btn-settings" class="btn" title="设置"><i class="ri-settings-3-line"></i></button>
   </div>
 
   <aside id="side">
@@ -67,11 +68,12 @@
   <!-- 贴纸条：一包一条，strips.js 生成 -->
   <aside id="strips"></aside>
 
+  <!-- 拿在手上的那张贴纸：按屏幕像素画，比例跟着本子（画布）走，不跟桌面层也不跟本子层。
+       必须留在 #viewport 里面：position:fixed 会自成一个层叠上下文，放外面就永远压在左栏和工具行上头了 -->
+  <div id="hand"></div>
+
   <div id="toast" class="card"></div>
 </div>
-
-<!-- 拿在手上的那张贴纸：按屏幕像素画，比例跟着本子（画布）走，不跟桌面层也不跟本子层 -->
-<div id="hand"></div>
 
 <!-- 贴纸条上的悬停提示：贴纸名 / 编号 + 包名。不用原生 title（慢、没法配色） -->
 <div id="tip" hidden></div>

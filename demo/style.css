@@ -22,7 +22,20 @@ html,body{margin:0;height:100%;background:var(--bg);overflow:hidden;font:13.5px/
 
 /* ===== 外壳：背景锁死，其它都是浮在上面的层 =====
    窗口 = 视口 = 桌面。工具行和左右两个面板都 absolute 在视口里，开合只是盖住画面，
-   绝不改变桌面、本子、贴纸的位置和大小。--float 是这几层共同的"浮层"底 */
+   绝不改变桌面、本子、贴纸的位置和大小。--float 是这几层共同的"浮层"底
+
+   叠放顺序（改之前先看这张表）：
+     #world 0      桌面背景、本子、贴在上面的贴纸（本子 1 / 桌面贴纸层 3）
+     #strips 15    右栏贴纸条——手上的贴纸要能盖过它，所以它最低
+     #hand 20      正拿在手上的那一张
+     #side 30      左栏素材包面板 ┐ 这两层压在手上的贴纸之上：
+     #topbar 30    工具行         ┘ 面板和按钮任何时候都点得到
+     .sb-track 35  自绘滚动条的滑块（scrollbar.js，fixed 挂在 body 上）
+     #toast 60     提示条
+     #peel 80      撕贴纸的 WebGL 层，盖满窗口
+     #tip 85       贴纸条上的悬停提示
+     #modal 90     设置弹窗（里面的滚动条另给 95）
+     #loading 100  加载遮罩，最上面 */
 #viewport{
   --float:color-mix(in srgb,var(--panel) 92%,transparent);
   position:fixed;inset:0;overflow:hidden;touch-action:none;background:var(--bg);
@@ -36,25 +49,28 @@ html,body{margin:0;height:100%;background:var(--bg);overflow:hidden;font:13.5px/
 }
 
 #topbar{
-  position:absolute;left:50%;top:12px;transform:translateX(-50%);z-index:20;
-  display:flex;align-items:center;gap:6px;padding:6px 10px;flex-wrap:wrap;justify-content:center;
+  position:absolute;left:50%;top:12px;transform:translateX(-50%);z-index:30;
+  display:flex;align-items:center;gap:3px;padding:5px 7px;flex-wrap:wrap;justify-content:center;
   max-width:calc(100% - 24px);
   background:var(--float);backdrop-filter:blur(8px);
   border-radius:12px;box-shadow:0 16px 44px var(--shadow);
 }
-#topbar .btn{padding:5px 10px;font-size:12.5px}
-.bar-sep{width:1px;align-self:stretch;background:color-mix(in srgb,var(--fg) 14%,transparent);margin:2px 2px}
-.zoom-readout{min-width:44px;text-align:right;font-variant-numeric:tabular-nums}
+/* 只有图标，名字走 title；尺寸统一，分组之间插一根细线 */
+#topbar .btn{width:30px;height:30px;padding:0;justify-content:center;border-radius:7px}
+#topbar .btn i{font-size:17px}
+#topbar .zoom-btn{width:auto;padding:0 8px;gap:4px}
+#topbar .zoom-btn b{font-weight:400;font-size:11.5px;font-variant-numeric:tabular-nums;min-width:32px;text-align:right}
+.bar-sep{width:1px;height:18px;background:color-mix(in srgb,var(--fg) 14%,transparent);margin:0 3px}
 
 /* 两个面板让开工具行（工具行换行变高时 --bar-h 跟着变，app.js 量的） */
 #side,#strips{
-  position:absolute;top:calc(var(--bar-h,42px) + 24px);bottom:12px;z-index:15;min-height:0;
+  position:absolute;top:calc(var(--bar-h,40px) + 24px);bottom:12px;min-height:0;
   display:flex;flex-direction:column;overflow-y:auto;
   background:var(--float);backdrop-filter:blur(8px);
   border-radius:12px;box-shadow:0 16px 44px var(--shadow);
 }
-#side{left:12px;width:288px}
-#strips{right:12px;width:300px}
+#side{left:12px;width:288px;z-index:30}
+#strips{right:12px;width:300px;z-index:15}   /* 比 #hand 低：手上的贴纸要能盖过贴纸条 */
 .side-head{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 8px 8px 12px;font-size:10.5px;text-transform:uppercase;letter-spacing:.12em;color:var(--dim2);font-weight:700}
 #side-body{display:flex;flex-direction:column;gap:10px;padding:0 10px 12px;min-height:0;flex:1}
 .side-foot{display:flex;flex-direction:column;gap:6px;align-items:flex-start}
@@ -134,13 +150,17 @@ html,body{margin:0;height:100%;background:var(--bg);overflow:hidden;font:13.5px/
   white-space:pre-line;font-size:12px;line-height:1.3;padding:6px;
   background:rgba(240,239,235,.9);border:2px dashed var(--fg);filter:none;
 }
-/* 拿在手上的那张：自己一层，按屏幕像素画，压在两栏浮层之上、撕纸层之下 */
-#hand{position:fixed;inset:0;pointer-events:none;z-index:70}
+/* 拿在手上的那张：自己一层，按屏幕像素画，压在贴纸条之上、左栏和工具行之下 */
+/* absolute 而不是 fixed：#viewport 本身就铺满窗口，坐标一样是屏幕坐标；
+   fixed 会自成层叠上下文，那样它就永远压在左栏和工具行上头了 */
+#hand{position:absolute;inset:0;pointer-events:none;z-index:20}
 
 /* ===== 贴纸条（右栏，一包一条） ===== */
-#strips{padding:8px;gap:10px}
-.strip{flex:0 0 auto;border-radius:var(--radius-lg);overflow:hidden;background:var(--panel2)}
-.strip-head{display:flex;align-items:center;gap:6px;padding:6px 10px;cursor:pointer;font-size:12.5px;color:var(--fg);user-select:none}
+/* 右栏里就是一整条贴纸纸：不要"容器里再套一层容器"。
+   包表头做成整条宽的一行分隔，纸和贴纸左右都撑满栏宽 */
+#strips{padding:0;gap:0}
+.strip{flex:0 0 auto}
+.strip-head{display:flex;align-items:center;gap:6px;padding:7px 12px;cursor:pointer;font-size:12.5px;color:var(--fg);user-select:none;background:var(--panel2)}
 .strip-head:hover{background:color-mix(in srgb,var(--fg) 6%,var(--panel2))}
 .strip-head .chev{font-size:16px;color:var(--dim);transition:transform .15s}
 .strip.collapsed .chev{transform:rotate(-90deg)}
@@ -149,7 +169,7 @@ html,body{margin:0;height:100%;background:var(--bg);overflow:hidden;font:13.5px/
 /* 条身就是一张贴纸纸：波点 + 渐变（或皮肤纹理，按原尺寸平铺）。
    贴纸按轮廓见缝插针地摆（strips.js 算坐标），所以是绝对定位、高度由排版决定 */
 .strip-body{
-  position:relative;padding:6px;
+  position:relative;padding:0;
   background:
     radial-gradient(circle,var(--strip-dot) 0 3px,transparent 3.5px) 0 0/26px 26px,
     var(--skin-strip-bg,linear-gradient(160deg,var(--strip-paper),var(--strip-paper2)));
@@ -167,6 +187,15 @@ html,body{margin:0;height:100%;background:var(--bg);overflow:hidden;font:13.5px/
 .slot.used img{visibility:hidden}
 /* 缩小显示的贴纸用平滑采样（像素画缩小时硬采样会出锯齿） */
 .slot.smooth img,.placed.smooth{image-rendering:auto}
+
+/* 自绘滚动条（scrollbar.js）：原生的藏掉，另画一根细滑块浮在内容右侧，一像素布局宽度都不占 */
+.scroll-clean{scrollbar-width:none;-ms-overflow-style:none}
+.scroll-clean::-webkit-scrollbar{display:none}
+.sb-track{position:fixed;border-radius:99px;pointer-events:none;opacity:0;transition:opacity .25s}
+.sb-track.on{opacity:1}
+.sb-thumb{position:absolute;left:0;width:100%;border-radius:99px;background:color-mix(in srgb,var(--dim) 55%,transparent);pointer-events:auto;cursor:grab}
+.sb-thumb:hover,.sb-thumb:active{background:color-mix(in srgb,var(--dim) 85%,transparent)}
+.sb-track:not(.on) .sb-thumb{pointer-events:none}
 
 /* 悬停提示：贴纸名 / 编号 + 包名。跟着指针走，压在所有浮层之上 */
 #tip{

@@ -8,6 +8,7 @@ import { createStrips } from './strips.js';
 import { silhouetteOf } from './silhouette.js';
 import { createPeeler, DETACH_AT } from './peel.js';
 import { applySkin, clearSkin, readSkin, preloadSkinCache } from './skin.js';
+import { attachScrollbar } from './scrollbar.js';
 
 preloadSkinCache();   // 赶在读存档、装包之前先把上次的皮肤颜色刷上，加载页不闪默认色
 const STAGE_W = 1672, STAGE_H = 941;
@@ -56,6 +57,9 @@ applyFit();
 peeler?.resize();
 // 工具行换行会变高，两个面板要跟着往下让
 new ResizeObserver(() => viewport.style.setProperty('--bar-h', topbar.offsetHeight + 'px')).observe(topbar);
+// 所有能滚的地方都换成自绘滚动条：原生的占宽度（贴纸条就撑不满了），也配不上皮肤
+for (const el of [stripsEl, sideEl, packList]) attachScrollbar(el);
+for (const el of modal.querySelectorAll('[data-pane], #skin-list')) attachScrollbar(el, { z: 95 });
 
 // ---------- 状态 ----------
 let state = normalize(await DB.get('kv', 'state').catch(() => null));
