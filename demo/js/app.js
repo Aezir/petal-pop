@@ -1,5 +1,5 @@
 // 花漾贴贴 · 运行时内核入口
-// 内核只认四种槽位：background / board / sticker / bgm。所有内容都来自素材包。
+// 内核只认几种槽位：background / board / sticker / bgm，外加界面皮肤 skin。所有内容都来自素材包。
 import { DB } from './db.js';
 import * as Packs from './packs.js';
 import { normalize, apply, project, findItem, STATE_VERSION } from './state.js';
@@ -7,7 +7,9 @@ import { createRenderer } from './render.js';
 import { createSheet } from './sheet.js';
 import { silhouetteOf } from './silhouette.js';
 import { createPeeler, DETACH_AT } from './peel.js';
+import { applySkin, clearSkin, readSkin, preloadSkinCache } from './skin.js';
 
+preloadSkinCache();   // 赶在读存档、装包之前先把上次的皮肤颜色刷上，加载页不闪默认色
 const STAGE_W = 1672, STAGE_H = 941;
 // 默认包来源，按顺序试：本地开发目录 → GitHub 资源仓库（线上部署时本地目录不存在）
 const DEFAULT_SOURCES = ['local:packs/default', 'Aezir/petal-pop-assets'];
@@ -71,6 +73,14 @@ function view() {
     background: effective('background', p.background),
     bgm: effective('bgm', state.settings.bgmRef),
   };
+}
+// 皮肤和底板一样：选了但暂时找不到（包被禁用/卸载）不清选择，显示回默认，包回来自动恢复。
+// 皮肤不进 fillDefaults——"默认主题"本身就是一个合法选择
+async function syncSkin() {
+  const ref = state.settings.skinRef;
+  if (ref && resolveRef(ref)?.entry.type === 'skin') return applySkin(ref, resolveRef);
+  clearSkin();
+  return null;
 }
 
 // 把画面要用到的 blob 都换成对象地址（第一次从 IndexedDB 读，之后命中缓存）
@@ -391,6 +401,21 @@ $('#btn-bg').onclick = () => {
   if (!ref) return showToast('没有可用的桌面');
   commit({ type: 'setBackground', ref }); render();
 };
+async function setSkin(ref) {
+  apply(state, { type: 'setSetting', patch: { skinRef: ref } });
+  save();
+  const cfg = await syncSkin();
+  if (!modal.hidden) renderSkinList();
+  return cfg;
+}
+$('#btn-skin').onclick = async () => {
+  const list = [null, ...refsOfType('skin')];   // 默认主题排第一
+  if (list.length < 2) return showToast('还没有可用的皮肤（素材包里带 skin 条目才有）');
+  const cur = resolveRef(state.settings.skinRef) ? state.settings.skinRef : null;
+  const ref = list[(list.indexOf(cur) + 1) % list.length];
+  const cfg = await setSkin(ref);
+  showToast(`皮肤 ${list.indexOf(ref) + 1} / ${list.length}：${cfg ? cfg.name : '默认'}`);
+};
 $('#btn-undo').onclick = undo;
 $('#btn-clear').onclick = () => {
   if (!project(state).items.length) return;
@@ -404,6 +429,7 @@ function showTab(name) {
   tabs.forEach(t => t.classList.toggle('on', t.dataset.tab === name));
   modal.querySelectorAll('[data-pane]').forEach(s => { s.hidden = s.dataset.pane !== name; });
   if (name === 'packs') renderPackList();
+  if (name === 'skins') renderSkinList();
   if (name === 'storage') renderStorage();
 }
 tabs.forEach(t => { t.onclick = () => showTab(t.dataset.tab); });
@@ -443,11 +469,12 @@ async function installDefault() {
 async function refresh() {
   await reloadPacks();
   fillDefaults();
+  await syncSkin();
   await render();
   clampSheet();
   paint();
   save();
-  if (!modal.hidden) renderPackList();
+  if (!modal.hidden) { renderPackList(); renderSkinList(); }
 }
 
 const fmtMB = b => (b / 1048576).toFixed(1) + ' MB';
@@ -472,7 +499,14 @@ async function renderPackList() {
       </div>`;
     row.querySelector('.pack-name').textContent = `${Packs.displayName(p.name)}  v${p.version}`;
     row.querySelector('.pack-meta').textContent =
-      `${p.label} · 贴纸 ${counts.sticker || 0} · 底板 ${counts.board || 0} · 桌面 ${counts.background || 0} · 音乐 ${counts.bgm || 0} · ${fmtMB(p.bytes)} · ${p.license || '未注明许可'}`;
+      `${p.label} · 贴纸 ${counts.sticker || 0} · 底板 ${counts.board || 0} · 桌面 ${counts.background || 0} · 音乐 ${counts.bgm || 0}` +
+      `${counts.skin ? ` · 皮肤 ${counts.skin}` : ''} · ${fmtMB(p.bytes)} · ${p.license || '未注明许可'}`;
+    if (p.skipped?.length) {   // 装的时候不认识的条目：说清楚跳过了什么，升级游戏后点「更新」补装
+      const sk = document.createElement('div');
+      sk.className = 'pack-skipped';
+      sk.textContent = `跳过了 ${p.skipped.length} 个游戏还不认识的条目（${p.skipped.map(e => `${e.id}:${e.type}`).join('、')}），升级游戏后点「更新」补装`;
+      row.querySelector('.pack-main').appendChild(sk);
+    }
     row.querySelector('input').onchange = ev => {
       apply(state, { type: 'setPack', id: p.id, patch: { enabled: ev.target.checked } });
       refresh();
@@ -494,6 +528,37 @@ async function renderPackList() {
       await refresh();
     };
     packList.appendChild(row);
+  }
+}
+// 皮肤列表：默认主题 + 启用包里的每个 skin 条目。读配置是异步的，用序号防止两次渲染交错
+const skinList = $('#skin-list');
+let skinListSeq = 0;
+async function renderSkinList() {
+  const my = ++skinListSeq;
+  const cur = resolveRef(state.settings.skinRef) ? state.settings.skinRef : null;
+  const items = [{ ref: null, name: '默认主题', swatch: ['#4a2e22', '#fff6e3', '#ff7fb0'], meta: '游戏自带' }];
+  for (const ref of refsOfType('skin')) {
+    const h = resolveRef(ref);
+    try {
+      const cfg = await readSkin(h);
+      items.push({ ref, name: cfg.name, swatch: cfg.swatch, preview: cfg.preview && await Packs.urlFor(cfg.preview), warn: cfg.warn.length, meta: Packs.displayName(h.pack.name) });
+    } catch (e) {
+      items.push({ ref, name: h.entry.id, swatch: ['#888', '#ccc', '#aaa'], meta: '读取失败：' + e.message });
+    }
+  }
+  if (my !== skinListSeq) return;
+  skinList.innerHTML = '';
+  for (const it of items) {
+    const card = document.createElement('div');
+    card.className = 'skin-card' + (it.ref === cur ? ' on' : '');
+    card.innerHTML = '<div class="skin-thumb"></div><div class="skin-main"><div class="skin-name"></div><div class="dim skin-meta"></div></div>';
+    const thumb = card.querySelector('.skin-thumb');
+    if (it.preview) { const img = document.createElement('img'); img.src = it.preview; img.alt = ''; thumb.appendChild(img); }
+    else for (const c of it.swatch) { const s = document.createElement('span'); s.style.background = c; thumb.appendChild(s); }   // swatch 里的值都过了白名单
+    card.querySelector('.skin-name').textContent = it.name;
+    card.querySelector('.skin-meta').textContent = it.meta + (it.warn ? ` · ${it.warn} 处配置被忽略（详情看控制台）` : '');
+    card.onclick = () => setSkin(it.ref);
+    skinList.appendChild(card);
   }
 }
 $('#btn-add').onclick = async () => {
@@ -527,6 +592,7 @@ async function importSave(file) {
   select(null);
   await reloadPacks();
   fillDefaults();
+  await syncSkin();
   save();
   await render();
   const missing = project(state).items.filter(i => !resolveRef(i.ref)).length;

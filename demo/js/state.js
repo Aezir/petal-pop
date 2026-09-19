@@ -22,7 +22,7 @@ export function makeState() {
     version: STATE_VERSION,
     activeProject: 'p1',
     projects: { p1: makeProject('p1', '我的本子') },
-    settings: { bgm: true, bgmRef: null, volume: 0.5 },
+    settings: { bgm: true, bgmRef: null, volume: 0.5, skinRef: null },
     packs: {},          // 包 id → { enabled, order }
   };
 }
@@ -77,8 +77,9 @@ export function normalize(raw) {
     p.seq = Math.max(+p.seq || 1, ...p.items.map(i => i.uid + 1), ...p.items.map(i => i.z + 1));
   }
   if (!s.projects[s.activeProject]) s.activeProject = Object.keys(s.projects)[0];
-  s.settings = { bgm: true, bgmRef: null, volume: 0.5, ...(s.settings || {}) };
+  s.settings = { bgm: true, bgmRef: null, volume: 0.5, skinRef: null, ...(s.settings || {}) };
   s.settings.volume = clamp(+s.settings.volume || 0, [0, 1]);
+  if (typeof s.settings.skinRef !== 'string') s.settings.skinRef = null;   // null = 默认主题，本身就是合法选择
   s.packs = (s.packs && typeof s.packs === 'object') ? s.packs : {};
   return s;
 }

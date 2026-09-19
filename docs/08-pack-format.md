@@ -14,6 +14,8 @@ my-pack/
   boards/              底板（本子、人偶板、房间…）
   backgrounds/         桌面背景
   bgm/                 音乐，mp3 / ogg / m4a
+  skin.json            界面皮肤（可选，见第 11 节）
+  textures/            皮肤用的纹理图
 ```
 
 目录名只是习惯，播放器真正看的是 manifest 里每个条目的 `file` 路径。
@@ -35,7 +37,9 @@ my-pack/
       "name": "草莓", "tags": ["食物", "春天"] },
     { "id": "notebook-09", "type": "board", "file": "boards/notebook-09.png", "w": 401, "h": 244, "sha256": "…" },
     { "id": "desk-day",    "type": "background", "file": "backgrounds/desk-day.png", "w": 1672, "h": 941, "sha256": "…" },
-    { "id": "woods",       "type": "bgm", "file": "bgm/woods.mp3", "sha256": "…" }
+    { "id": "woods",       "type": "bgm", "file": "bgm/woods.mp3", "sha256": "…" },
+    { "id": "theme",       "type": "skin", "file": "skin.json" },
+    { "id": "paper-tex",   "type": "skin-asset", "file": "textures/paper.png", "w": 64, "h": 64 }
   ]
 }
 ```
@@ -57,7 +61,7 @@ my-pack/
 | 字段 | 必需 | 说明 |
 |---|---|---|
 | `id` | 是 | 条目身份，包内唯一，规则同包 id，**定下后永不改**（改名、换图都不改 id） |
-| `type` | 是 | `sticker` / `board` / `background` / `bgm` |
+| `type` | 是 | `sticker` / `board` / `background` / `bgm` / `skin`（界面皮肤配置）/ `skin-asset`（皮肤纹理、预览图） |
 | `file` | 是 | 相对包根的路径，不能以 `/` 开头，不能含 `..` |
 | `w` `h` | 图片建议 | 像素尺寸。播放器安装时会用真实解码尺寸覆盖 |
 | `sha256` | 建议 | 文件内容哈希。写了播放器就校验，对不上拒绝安装 |
@@ -66,6 +70,9 @@ my-pack/
 | `sheet` | 否 | 仅贴纸：在原图贴纸纸上的左上角位置 `{"x":12,"y":34}`（原图像素）。用 `tools/locate-on-sheet.py` 自动生成 |
 
 播放器只读它认识的字段，**不认识的字段一律忽略、不报错**。所以包可以先于播放器加字段。
+
+**不认识的条目类型**（比播放器更新的包格式）也不报错：那个条目跳过不装，记进安装记录，设置页的包列表会写明"跳过了哪些"；玩家升级游戏后点「更新」就能补装。只有整个包一个条目都不认识时才拒绝安装。
+（给改播放器的人：新增 `type` 必须把 `packs.js` 的 `INSTALLER` 加一，否则清单哈希没变的老包不会重装、补不上。）
 
 ## 3. 引用规则：`包id:条目id`
 
@@ -100,11 +107,11 @@ manifest 就是两层之间的桥：每个版本里 id → 哈希的一张对照
 
 | 检查 | 规则 |
 |---|---|
-| 类型 | 只认四种 `type`；图片只收 png/jpg/webp/gif，**不收 svg**；音频只收 mp3/ogg/m4a |
-| MIME | 服务器返回的 Content-Type 必须是 `image/*` 或 `audio/*` |
-| 可解码 | 图片必须能被浏览器解码；音频检查文件头（ID3 / MPEG 帧 / OggS / ftyp） |
+| 类型 | 只认六种 `type`（不认识的跳过，见第 2 节）；图片只收 png/jpg/webp/gif，**不收 svg**；音频只收 mp3/ogg/m4a；皮肤配置只收 .json |
+| MIME | 图片、音频的 Content-Type 必须是 `image/*` / `audio/*`；皮肤 JSON 不查 MIME（本地静态服务器常给 text/plain） |
+| 可解码 | 图片必须能被浏览器解码；音频检查文件头（ID3 / MPEG 帧 / OggS / ftyp）；`skin.json` 必须是对象且 `skinVersion` 不比播放器认识的新 |
 | 哈希 | manifest 写了 `sha256` 就必须对上 |
-| 上限 | 单文件 32MB，单包 300MB，条目 2000 个 |
+| 上限 | 单文件 32MB，单包 300MB，条目 2000 个；`skin-asset` 最长边 2048 像素 |
 
 包里**永远不会执行脚本**，这是共建的安全底线。
 
@@ -165,3 +172,68 @@ python tools/locate-on-sheet.py packs/my-pack 原图.png
 
 存档里存的是 `包id:条目id` 和坐标，不存图。换电脑只要装同样的包，存档就能完整复原。
 装机清单（装了哪些包、启用哪些、当前底板和背景）和作品一起存在游戏状态里，几 KB 的 JSON，后续可以同步到自己的 GitHub 仓库。
+
+## 11. 界面皮肤（`skin` / `skin-asset`）
+
+皮肤改的是**系统界面**——工具栏、贴纸纸卡片、设置弹窗、提示条、加载页——不是桌面和本子（那两个是 `background` / `board`）。
+一个包可以带任意个皮肤；纯皮肤包（只有 `skin` 和 `skin-asset` 条目）和贴纸包附带皮肤都行。玩家在工具栏「换皮肤」循环切换，或在设置页「皮肤」里选；同一时间只有一套生效，"默认主题"本身是一个选项。
+
+### skin.json
+
+```json
+{
+  "skinVersion": 1,
+  "name": "海盐蓝",
+  "preview": "preview",
+  "colors": {
+    "ink": "#2f3f5f", "paper": "#eef3ff", "pink": "#8fb8ff", "pinkDeep": "#4b7bd6",
+    "shadow": "rgba(30,50,90,.35)", "pageBg": "#16202e", "stageBg": "#7f97b8", "overlay": "rgba(10,20,40,.55)",
+    "glow": "#ffffff", "onAccent": "#ffffff",
+    "btnHover": "#dde8ff", "btnDangerHover": "#ffd6d6", "inputFocus": "#e8f0ff",
+    "tabOnBg": "#ffffff", "packRowBg": "#ffffff",
+    "barTrack": "#ffffff", "barFill": "#8fb8ff", "barFillDeep": "#4b7bd6",
+    "sheetGrad1": "#dbe8ff", "sheetGrad2": "#c4d8f7", "sheetGrad3": "#adc6ee",
+    "sheetDotColor": "rgba(255,255,255,.7)", "sheetDotSmColor": "rgba(255,255,255,.4)", "sheetDashColor": "rgba(255,255,255,.9)"
+  },
+  "textures": { "sheetPaper": "paper-tex", "box": "paper-tex", "button": null, "modal": null, "toast": null, "loading": null },
+  "sheet": { "dotPattern": false, "dashedBorder": true, "borderRadius": 10 },
+  "font": null
+}
+```
+
+| 字段 | 说明 |
+|---|---|
+| `skinVersion` | 必需，整数。比播放器认识的新就拒绝安装 |
+| `name` | 显示名，最长 60 字 |
+| `preview` | 同包一个 `skin-asset` 的条目 id，设置页当缩略图（建议 120×90）。不写就用 ink / paper / pink 三色拼一个色块 |
+| `colors.*` | 每个键对应界面上的一种取色（`ink` 描边和文字、`paper` 盒子底、`pink` 强调、`pinkDeep` 深强调、`shadow` 硬阴影、`pageBg` 页面底、`stageBg` 桌面兜底色、`overlay` 弹窗遮罩、`glow` 盒子内圈亮边、`onAccent` 强调色上的文字、`btnHover` 等悬停/聚焦色、`sheet*` 贴纸纸渐变三色和波点/虚线色）。不认识的键忽略 |
+| `textures.*` | 纹理槽位，值是同包 `skin-asset` 的条目 id。`sheetPaper` 贴纸纸底；`box` 所有盒子（弹窗、提示条、加载卡）；`button` 按钮；`modal` / `toast` / `loading` 单独覆盖对应的盒子，不写就用 `box` |
+| `sheet` | `dotPattern` / `dashedBorder`：布尔，关掉贴纸纸的波点 / 虚线框；`borderRadius`：0～64 的整数（像素） |
+| `font` | 字体名列表字符串（如 `"Zpix", "Microsoft YaHei", sans-serif`）。**只用玩家机器上已有的字体，不会加载远程字体** |
+
+所有字段可选；`null` 或不写 = 保持默认；不认识的字段忽略。
+
+### 值的写法（白名单，不是黑名单）
+
+皮肤是第三方内容，播放器只接受能一眼看穿的字面量：
+
+- 颜色：`#rgb` `#rgba` `#rrggbb` `#rrggbbaa`，或 `rgb()` `rgba()` `hsl()` `hsla()` 且括号里只有数字、`.`、`%`、空格、逗号、`/`。
+  `var(--x)`、`url(...)`、`calc()`、颜色名（`red`）都不收——不是因为它们危险与否，而是只有字面量才能保证它们**只会被当成颜色**。
+- 不合法的值单独丢弃并在控制台说明（设置页会标"N 处配置被忽略"），不影响其余字段、不影响安装。
+- 皮肤名等文字按纯文本显示，不解析 HTML。
+
+### 纹理的约定
+
+- 纹理**只替换底层**：贴纸纸的波点、虚线框仍由 `sheet.*` 控制；盒子的描边、阴影、内圈亮边仍由 `colors.*` 控制。
+- 按原尺寸**平铺**，1 图片像素 = 1 舞台逻辑像素，最近邻采样（像素风不糊）。所以纹理做成能无缝拼接的小块（64～256 见方）最合适；整幅插画当面板底不在 v1 的目标里。
+- 最长边不超过 2048 像素。
+
+### 切换与兜底
+
+- 切换即时生效、不刷新页面；从皮肤 A 切到只写了部分字段的皮肤 B，B 没写的字段回到默认，不会残留 A 的值。
+- 皮肤所在的包被禁用或卸载：界面回到默认主题，但玩家的选择保留着，包装回来自动恢复（和底板、桌面一样）。
+- 上次的颜色会记在本机（localStorage），下次打开时在读素材包之前就先刷上，加载页不会先闪一下默认色。
+
+### 目前要手写清单
+
+`tools/make-manifest.py` 还只扫贴纸 / 底板 / 桌面 / 音乐目录，`skin` 和 `skin-asset` 条目暂时手动写进 `entries`（不写 `sha256` 也能装，播放器安装时会自己算）。
