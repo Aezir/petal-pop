@@ -5,11 +5,12 @@ import { sha256 } from './hash.js';
 
 export const FORMAT_VERSION = 1;
 // 内核认识的内容类型 → 文件种类
-export const TYPES = { sticker: 'image', board: 'image', background: 'image', bgm: 'audio' };
-export const LIMITS = { fileBytes: 32 * 1024 * 1024, entries: 2000, packBytes: 300 * 1024 * 1024 };
-// 安装器版本：安装记录里开始存新字段时加一（2：贴纸纸排版 sheet/scale）。
-// 旧安装器装的记录缺这些字段，启动时自动重装一次；文件没变的不重下
-export const INSTALLER = 2;
+export const TYPES = { sticker: 'image', board: 'image', background: 'image', bgm: 'audio', skin: 'json', 'skin-asset': 'image' };
+export const LIMITS = { fileBytes: 32 * 1024 * 1024, entries: 2000, packBytes: 300 * 1024 * 1024, skinAssetEdge: 2048 };
+export const SKIN_VERSION = 1;   // 皮肤配置（skin.json）的格式版本
+// 安装器版本：安装记录里开始存新字段、或 TYPES 变了就加一（2：贴纸纸排版 sheet/scale；3：skin 类型 + 跳过的条目 skipped）。
+// 旧安装器装的记录缺这些字段（或当年跳过了它不认识的条目），启动时自动重装一次；文件没变的不重下
+export const INSTALLER = 3;
 
 // 安装 / 卸载 / 回收互斥：同一标签页串成一条链，跨标签页再用 Web Locks。
 // 回收只认已提交的包，进行中的安装写了 blob 还没写 packs 记录，这时回收会把它删掉
@@ -23,6 +24,7 @@ function exclusive(fn) {
 
 const IMAGE_EXT = /\.(png|jpe?g|webp|gif)$/i;
 const AUDIO_EXT = /\.(mp3|ogg|m4a)$/i;
+const JSON_EXT = /\.json$/i;
 const ID_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 const HEX64 = /^[0-9a-f]{64}$/;
 
@@ -99,18 +101,24 @@ export function validateManifest(json) {
   if (!Array.isArray(json.entries)) throw new Error('缺少 entries 数组');
   if (json.entries.length > LIMITS.entries) throw new Error(`条目超过 ${LIMITS.entries} 个`);
 
-  const seen = new Set();
+  const seen = new Set(), skipped = [];
   const entries = json.entries.map((e, i) => {
     const at = `entries[${i}]`;
     if (!e || typeof e !== 'object') throw new Error(`${at} 不是对象`);
     if (typeof e.id !== 'string' || !ID_RE.test(e.id)) throw new Error(`${at} 缺少合法 id（每个条目必须声明稳定的 id）`);
     if (seen.has(e.id)) throw new Error(`条目 id 重复: ${e.id}`);
     seen.add(e.id);
-    if (!Object.hasOwn(TYPES, e.type)) throw new Error(`${at}(${e.id}) 类型不认识: ${e.type}`);
+    // 不认识的类型（更新的包格式）：跳过不装，记下来给设置页看；升级游戏后重装会补上
+    if (!Object.hasOwn(TYPES, e.type)) {
+      console.warn(`${at}(${e.id}) 类型不认识，已跳过: ${e.type}`);
+      skipped.push({ id: e.id, type: String(e.type), file: typeof e.file === 'string' ? e.file : '' });
+      return null;
+    }
     if (typeof e.file !== 'string' || !e.file || e.file.startsWith('/') || e.file.split('/').includes('..')) throw new Error(`${at}(${e.id}) file 不合法`);
     const kind = TYPES[e.type];
     if (kind === 'image' && !IMAGE_EXT.test(e.file)) throw new Error(`${e.id}: 图片只收 png/jpg/webp/gif（不收 svg）`);
     if (kind === 'audio' && !AUDIO_EXT.test(e.file)) throw new Error(`${e.id}: 音频只收 mp3/ogg/m4a`);
+    if (kind === 'json' && !JSON_EXT.test(e.file)) throw new Error(`${e.id}: 皮肤配置只收 .json`);
     if (e.sha256 != null && !HEX64.test(e.sha256)) throw new Error(`${e.id}: sha256 格式不对`);
     const out = { id: e.id, type: e.type, file: e.file };
     if (e.sha256) out.sha256 = e.sha256;
@@ -118,7 +126,8 @@ export function validateManifest(json) {
     for (const k of ['name', 'tags', 'anchor', 'deprecated']) if (e[k] != null) out[k] = e[k];
     if (Number.isFinite(e.sheet?.x) && Number.isFinite(e.sheet?.y)) out.sheet = { x: e.sheet.x, y: e.sheet.y };
     return out;
-  });
+  }).filter(Boolean);
+  if (!entries.length && skipped.length) throw new Error('这个包里的条目一个都不认识，可能要先升级游戏');
 
   // 可选：贴纸纸原图尺寸（配合条目的 sheet 位置照原样排版），手动缩放比例
   const sheet = json.sheet?.w > 0 && json.sheet?.h > 0 ? { w: json.sheet.w, h: json.sheet.h } : null;
@@ -133,7 +142,7 @@ export function validateManifest(json) {
     author: typeof json.author === 'string' ? json.author : '',
     license: typeof json.license === 'string' ? json.license : '',
     description: typeof json.description === 'string' ? json.description : '',
-    entries,
+    entries, skipped,
   };
 }
 
@@ -152,7 +161,19 @@ async function verifyBlob(blob, kind, entry) {
     catch { throw new Error(`${entry.file} 图片解码失败`); }
     const dims = { w: bmp.width, h: bmp.height };
     bmp.close();
+    if (entry.type === 'skin-asset' && Math.max(dims.w, dims.h) > LIMITS.skinAssetEdge) throw new Error(`${entry.file} 皮肤纹理最长边不能超过 ${LIMITS.skinAssetEdge}px`);
     return dims;
+  }
+  if (kind === 'json') {   // 不查 MIME：本地静态服务器可能给 text/plain 甚至空。内容形状在这里把关，装进去的皮肤一定能读
+    let j;
+    try { j = JSON.parse(await blob.text()); } catch { throw new Error(`${entry.file} 不是合法 JSON`); }
+    if (!j || typeof j !== 'object' || Array.isArray(j)) throw new Error(`${entry.file} 顶层必须是对象`);
+    if (entry.type === 'skin') {
+      const v = j.skinVersion;
+      if (!Number.isInteger(v) || v < 1) throw new Error(`${entry.file} 缺少 skinVersion`);
+      if (v > SKIN_VERSION) throw new Error(`${entry.file} 的皮肤格式版本 ${v} 比游戏认识的 ${SKIN_VERSION} 新，请升级游戏`);
+    }
+    return {};
   }
   if (!blob.type.startsWith('audio/')) throw new Error(`${entry.file} 不是音频（${blob.type || '无类型'}）`);
   const head = new Uint8Array(await blob.slice(0, 12).arrayBuffer());
@@ -233,7 +254,7 @@ async function doInstall(text, onProgress = () => {}) {
     license: man.license, description: man.description, formatVersion: man.formatVersion,
     sheet: man.sheet, scale: man.scale,
     source: sourceText(src), base: res.base, lock: res.lock, label: res.label,
-    manifestSha256, installer: INSTALLER, installedAt: Date.now(), bytes, entries,
+    manifestSha256, installer: INSTALLER, installedAt: Date.now(), bytes, entries, skipped: man.skipped,
   };
   await DB.put('packs', man.id, pack);
   return { pack, unchanged: false, updated: !!existing };
