@@ -540,16 +540,51 @@ addEventListener('keyup', e => { if (e.key.toLowerCase() === 'r') rHeld = false;
 addEventListener('blur', () => { rHeld = false; });   // 按着 R 切走窗口，回来时别还当它按着
 
 // ---------- 音乐 ----------
+// 音量：按钮点开一个小浮层（开关 + 横条）；在按钮上滚轮直接加减 5%。
+// 调的时候图标临时换成百分数，停 800ms 换回来——省得为了看一眼音量还要点开
+const bgmBtn = $('#btn-bgm'), volPop = $('#vol-pop'), volNum = $('#vol-num'), volRange = $('#volume'), volToggle = $('#vol-toggle');
+let volNumTimer = 0;
 function syncBgm() {
   const hit = resolveRef(view().bgm);
   const u = hit ? Packs.urlSync(hit.entry.sha256) : '';
   if (u && audio.dataset.hash !== hit.entry.sha256) { audio.src = u; audio.dataset.hash = hit.entry.sha256; }
   audio.volume = state.settings.volume;
-  const btn = $('#btn-bgm');
-  btn.classList.toggle('on', state.settings.bgm && !!u);
-  btn.querySelector('i').className = state.settings.bgm ? 'ri-music-2-line' : 'ri-volume-mute-line';
+  const on = state.settings.bgm && state.settings.volume > 0;
+  bgmBtn.classList.toggle('on', state.settings.bgm && !!u);
+  bgmBtn.querySelector('i').className = on ? 'ri-volume-up-line' : 'ri-volume-mute-line';
+  volToggle.querySelector('i').className = state.settings.bgm ? 'ri-volume-up-line' : 'ri-volume-mute-line';
+  volToggle.querySelector('span').textContent = state.settings.bgm ? '开' : '关';
+  volToggle.classList.toggle('on', state.settings.bgm);
+  volRange.value = Math.round(state.settings.volume * 100);
   if (state.settings.bgm && u) audio.play().catch(() => {}); else audio.pause();
 }
+// 调整时按钮上临时显示百分数
+function flashVolume() {
+  volNum.textContent = Math.round(state.settings.volume * 100) + '%';
+  volNum.hidden = false;
+  bgmBtn.querySelector('i').hidden = true;
+  clearTimeout(volNumTimer);
+  volNumTimer = setTimeout(() => { volNum.hidden = true; bgmBtn.querySelector('i').hidden = false; }, 800);
+}
+function setVolume(v) {
+  const vol = Math.min(1, Math.max(0, v));
+  if (Math.abs(vol - state.settings.volume) < 1e-4) return;
+  apply(state, { type: 'setSetting', patch: { volume: vol } });
+  save(); syncBgm(); flashVolume();
+}
+bgmBtn.onclick = () => { volPop.hidden = !volPop.hidden; };
+volToggle.onclick = () => { commit({ type: 'setBgm', on: !state.settings.bgm }); syncBgm(); };
+volRange.oninput = () => setVolume(volRange.value / 100);
+// 滚轮在这个按钮上：一格 ±5%，而且绝不能传给本子缩放
+bgmBtn.addEventListener('wheel', e => {
+  e.preventDefault(); e.stopPropagation();
+  setVolume(state.settings.volume + (e.deltaY < 0 ? 0.05 : -0.05));
+}, { passive: false });
+// 点浮层外面就收起来
+addEventListener('pointerdown', e => {
+  const t = e.target instanceof Node ? e.target : null;
+  if (!volPop.hidden && !(t && (volPop.contains(t) || bgmBtn.contains(t)))) volPop.hidden = true;
+}, true);
 addEventListener('pointerdown', () => { if (state.settings.bgm && audio.src && audio.paused) audio.play().catch(() => {}); });
 
 // ---------- 工具条 ----------
@@ -559,7 +594,6 @@ function showToast(msg) {
   clearTimeout(showToast.t);
   showToast.t = setTimeout(() => toast.classList.remove('show'), 1800);
 }
-$('#btn-bgm').onclick = () => { commit({ type: 'setBgm', on: !state.settings.bgm }); syncBgm(); };
 async function setSkin(ref) {
   apply(state, { type: 'setSetting', patch: { skinRef: ref } });
   save();

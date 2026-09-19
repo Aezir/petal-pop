@@ -26,7 +26,14 @@
     <button id="btn-side" class="btn" title="素材包面板"><i class="ri-stack-line"></i></button>
     <button id="btn-strips" class="btn" title="贴纸条面板"><i class="ri-price-tag-3-line"></i></button>
     <span class="bar-sep"></span>
-    <button id="btn-bgm" class="btn" title="音乐开关"><i class="ri-music-2-line"></i></button>
+    <!-- 音乐：点开一个小浮层调音量；在按钮上滚轮直接加减 5%，调的时候图标变成百分数 -->
+    <div class="bar-item">
+      <button id="btn-bgm" class="btn" title="音乐：点开调音量，在这上面滚轮直接加减"><i class="ri-volume-up-line"></i><b id="vol-num" hidden>50%</b></button>
+      <div id="vol-pop" class="card" hidden>
+        <button id="vol-toggle" class="btn"><i class="ri-volume-up-line"></i><span>开</span></button>
+        <input id="volume" type="range" min="0" max="100" title="音量">
+      </div>
+    </div>
     <span class="bar-sep"></span>
     <button id="btn-save" class="btn" title="保存桌上的每一本为作品 (Ctrl+S)"><i class="ri-save-3-line"></i></button>
     <button id="btn-saveas" class="btn" title="另存为新作品"><i class="ri-file-copy-line"></i></button>
