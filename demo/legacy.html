@@ -44,19 +44,6 @@
           <div id="boardLayer"></div>
         </div>
 
-        <!-- 贴纸纸：桌上的一张印刷贴纸纸，一个素材包一张；拖空白处挪，装了多个包时底下换纸 -->
-        <div id="sheetObj" hidden>
-          <div class="sheet-paper">
-            <div id="sheetSlots"></div>
-            <div class="sheet-foot">
-              <button id="sheet-prev" class="sheet-btn" title="上一张纸 (←)"><i class="ri-arrow-left-s-fill"></i></button>
-              <span id="sheetTitle"></span>
-              <span id="sheetPage" class="dim"></span>
-              <button id="sheet-next" class="sheet-btn" title="下一张纸 (→)"><i class="ri-arrow-right-s-fill"></i></button>
-            </div>
-          </div>
-        </div>
-
         <!-- 贴在桌面上的贴纸层 -->
         <div id="layer"></div>
       </div>
@@ -64,7 +51,8 @@
     </div>
   </main>
 
-  <aside id="strips"><p class="dim side-placeholder">贴纸条（下一步）</p></aside>
+  <!-- 贴纸条：一包一条，strips.js 生成 -->
+  <aside id="strips"></aside>
 </div>
 
 <!-- 撕贴纸的 WebGL 层：盖满整个窗口、按屏幕像素画，只画正在撕的那一张；不接事件 -->

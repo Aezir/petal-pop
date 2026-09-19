@@ -119,46 +119,39 @@ img{image-rendering:pixelated;image-rendering:crisp-edges}
 
 .dim{opacity:.6;font-size:13px}
 
-/* ===== 贴纸纸（桌上的一张印刷贴纸纸） ===== */
-/* 位置 = 纸的中心，尺寸由 sheet.js 按包的排版算出来；和本子一样是桌上的物件，压在本子上面、桌面贴纸下面 */
-#sheetObj{position:absolute;z-index:2;filter:drop-shadow(6px 8px 0 var(--shadow));pointer-events:none}
-/* 三层：波点、小波点、底（渐变或皮肤纹理）。皮肤关波点就把 --skin-sheet-dot 设成 none，纹理只替换最底层 */
-.sheet-paper{
-  position:absolute;inset:0;border:4px solid var(--ink);border-radius:var(--skin-sheet-radius,14px);overflow:hidden;
+/* ===== 贴纸条（右栏，一包一条） ===== */
+#strips{padding:8px;gap:10px}
+.strip{flex:0 0 auto;border-radius:var(--radius-lg);overflow:hidden;background:var(--panel2)}
+.strip-head{display:flex;align-items:center;gap:6px;padding:6px 10px;cursor:pointer;font-size:12.5px;color:var(--fg);user-select:none}
+.strip-head:hover{background:color-mix(in srgb,var(--fg) 6%,var(--panel2))}
+.strip-head .chev{font-size:16px;color:var(--dim);transition:transform .15s}
+.strip.collapsed .chev{transform:rotate(-90deg)}
+.strip-name{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.strip-count{margin-left:auto;color:var(--dim2);font-size:11px;font-variant-numeric:tabular-nums}
+/* 条身就是一张贴纸纸：波点 + 渐变（或皮肤纹理），贴纸靠 flex 换行紧凑排 */
+.strip-body{
+  display:flex;flex-wrap:wrap;align-items:flex-end;gap:6px;padding:10px;
   background:
     var(--skin-sheet-dot,radial-gradient(circle,var(--sheet-dot-color) 0 3px,transparent 3.5px)) 0 0/26px 26px,
     var(--skin-sheet-dot-sm,radial-gradient(circle,var(--sheet-dot-sm-color) 0 2px,transparent 2.5px)) 13px 13px/26px 26px,
     var(--skin-sheet-bg,linear-gradient(160deg,var(--sheet-grad-1),var(--sheet-grad-2) 60%,var(--sheet-grad-3)));
   image-rendering:pixelated;
 }
-.sheet-paper::before{
-  content:'';position:absolute;inset:7px 7px 34px;
-  border:2px var(--skin-sheet-dash,dashed) var(--sheet-dash-color);
-  border-radius:max(0px,calc(var(--skin-sheet-radius,14px) - 6px));
-}
-#sheetSlots{position:absolute;inset:0}
+.strip.collapsed .strip-body{display:none}
 /* 一格贴纸：外形按贴纸自己的透明度裁出来；贴纸撕走后，这格的底色就是底纸上亮面的刀模空位 */
 .slot{
-  position:absolute;image-rendering:auto;   /* 别继承纸的 pixelated：遮罩缩小时要平滑，否则刀模边缘出锯齿 */
+  position:relative;flex:0 0 auto;cursor:grab;image-rendering:auto;   /* 别继承纸的 pixelated：遮罩缩小时要平滑，否则刀模边缘出锯齿 */
   -webkit-mask:var(--m) center/100% 100% no-repeat;mask:var(--m) center/100% 100% no-repeat;
   background:linear-gradient(135deg,rgba(255,255,255,.9),rgba(255,255,255,.4) 45%,rgba(255,255,255,.75));
 }
 .slot img{display:block;width:100%;height:100%}
+.slot.used{cursor:default}
 .slot.used img{visibility:hidden}
 /* 缩小显示的贴纸用平滑采样（像素画缩小时硬采样会出锯齿） */
 .slot.smooth img,.placed.smooth{image-rendering:auto}
-.sheet-foot{
-  position:absolute;left:0;right:0;bottom:5px;height:24px;display:flex;justify-content:center;align-items:center;gap:10px;
-  font-size:15px;color:var(--ink);letter-spacing:1px;
-}
-#sheetObj.single .sheet-btn,#sheetObj.single #sheetPage{display:none}
-.sheet-btn{
-  pointer-events:auto;cursor:pointer;width:22px;height:22px;padding:0;display:flex;align-items:center;justify-content:center;
-  border:3px solid var(--ink);background:var(--paper);color:var(--ink);box-shadow:2px 2px 0 var(--shadow);
-}
-.sheet-btn i{font-size:20px}
-.sheet-btn:hover{background-color:var(--btn-hover)}
-.sheet-btn:disabled{opacity:.35;cursor:default}
+/* 从条上撕下来交接到画布那一刻：从缩略尺寸弹到实际尺寸 */
+.placed.pop{animation:pop .16s ease-out}
+@keyframes pop{from{scale:var(--pop-from,1)}to{scale:1}}
 
 /* 撕贴纸的 WebGL 层：盖满整个窗口（屏幕像素），在三栏之上、弹窗之下，不接事件 */
 #peel{position:fixed;inset:0;width:100%;height:100%;pointer-events:none;z-index:80}

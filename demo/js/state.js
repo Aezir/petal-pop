@@ -3,18 +3,16 @@
 export const STATE_VERSION = 5;   // 5：加 ui（相机、面板折叠），不进撤销
 const DEFAULT_PACK = 'petalpop-default';
 
-// 本子默认摆在桌面空位中央。贴纸和本子都是原始大小，不缩放、不翻转。
-// BOARD_DEFAULT 是老存档里本子的位置（读旧档时兜底用）；新开的本子摆在左边，给右边的贴纸纸让位
+// 本子默认摆在桌面中央。贴纸和本子都是原始大小，不缩放、不翻转。
+// BOARD_DEFAULT 是最早那版存档里本子的位置（读旧档时兜底用）；新开的本子摆在桌面中间偏下（贴纸纸已经搬到右栏，不用让位）
 export const BOARD_DEFAULT = { x: 830, y: 585 };
-const BOARD_START = { x: 420, y: 560 };
-// 贴纸纸默认摆在桌面右下；page 是当前摆出来的是第几个包的纸（从 0 数）
-export const SHEET_DEFAULT = { x: 1262, y: 640, page: 0 };
+const BOARD_START = { x: 836, y: 470 };
 
 const clamp = (v, [lo, hi]) => Math.min(hi, Math.max(lo, v));
 const r2 = v => +(+v).toFixed(2);
 
 export function makeProject(id, name) {
-  return { id, name, board: null, background: null, boardT: { ...BOARD_START }, sheetT: { ...SHEET_DEFAULT }, seq: 1, items: [] };
+  return { id, name, board: null, background: null, boardT: { ...BOARD_START }, seq: 1, items: [] };
 }
 
 export function makeState() {
@@ -81,8 +79,7 @@ export function normalize(raw) {
     const t = { ...BOARD_DEFAULT, ...(p.boardT || {}) };
     const oldT = { x: +t.x || BOARD_DEFAULT.x, y: +t.y || BOARD_DEFAULT.y, s: +t.s || 1, flip: !!t.flip };
     p.boardT = { x: oldT.x, y: oldT.y };
-    const st = { ...SHEET_DEFAULT, ...(p.sheetT || {}) };
-    p.sheetT = { x: +st.x || SHEET_DEFAULT.x, y: +st.y || SHEET_DEFAULT.y, page: Math.max(0, Math.floor(+st.page) || 0) };
+    delete p.sheetT;   // v5 之前贴纸纸是桌上的物件，有位置和页码；现在是右栏的贴纸条，不再存
     p.items = (Array.isArray(p.items) ? p.items : [])
       .filter(i => i && typeof i.ref === 'string')
       .map(i => normItem(i, oldT, !('on' in i)));
@@ -152,8 +149,6 @@ export function apply(state, a) {
     case 'setBoard': p.board = a.ref; return;
     case 'setBackground': p.background = a.ref; return;
     case 'boardMove': p.boardT.x = r2(a.x); p.boardT.y = r2(a.y); return;
-    case 'sheetMove': p.sheetT.x = r2(a.x); p.sheetT.y = r2(a.y); return;
-    case 'sheetPage': p.sheetT.page = Math.max(0, a.page | 0); return;
     case 'setSetting': Object.assign(state.settings, a.patch); return;
     case 'setUi': Object.assign(state.ui, a.patch); return;
     case 'setStripUi': state.ui.strips[a.id] = { ...(state.ui.strips[a.id] || {}), ...a.patch }; return;

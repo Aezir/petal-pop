@@ -4,7 +4,7 @@ import { DB } from './db.js';
 import * as Packs from './packs.js';
 import { normalize, apply, project, findItem, STATE_VERSION } from './state.js';
 import { createRenderer } from './render.js';
-import { createSheet } from './sheet.js';
+import { createStrips } from './strips.js';
 import { silhouetteOf } from './silhouette.js';
 import { createPeeler, DETACH_AT } from './peel.js';
 import { applySkin, clearSkin, readSkin, preloadSkinCache } from './skin.js';
@@ -15,7 +15,7 @@ const STAGE_W = 1672, STAGE_H = 941;
 const DEFAULT_SOURCES = ['local:packs/default', 'Aezir/petal-pop-assets'];
 const $ = s => document.querySelector(s);
 
-const appEl = $('#app'), viewport = $('#viewport'), world = $('#world'), zoomReadout = $('#zoom-readout'),
+const appEl = $('#app'), viewport = $('#viewport'), world = $('#world'), zoomReadout = $('#zoom-readout'), stripsEl = $('#strips'),
       layer = $('#layer'), boardWrap = $('#boardWrap'), boardEl = $('#board'),
       boardLayer = $('#boardLayer'), toast = $('#toast'), audio = $('#bgm'), loading = $('#loading'), loadText = $('#load-text'),
       bar = $('#bar'), modal = $('#modal'), packList = $('#pack-list');
@@ -119,32 +119,23 @@ let sel = null;   // { kind:'board' } | null（本子被选中时描一圈粉边
 function select(s) { sel = s; }
 
 // ---------- 渲染 ----------
-const sheet = createSheet({
-  root: $('#sheetObj'), slotsEl: $('#sheetSlots'), titleEl: $('#sheetTitle'), pageEl: $('#sheetPage'),
-  urlOf: Packs.urlSync, nameOf: Packs.displayName,
+const strips = createStrips({
+  root: stripsEl, urlOf: Packs.urlSync, nameOf: Packs.displayName, ui: () => state.ui,
+  onToggle: (id, collapsed) => { apply(state, { type: 'setStripUi', id, patch: { collapsed } }); save(); paint(); },
 });
-// 贴纸的显示尺寸 = 原图尺寸 × 所在包的缩放比例（由这个包的贴纸纸摆上桌的大小决定，见 sheet.js）
+// 贴纸的世界尺寸 = 原图尺寸 × 所在包的比例（768×512 规则，见 strips.js）。条上的缩略图另有自己的比例，不影响它
 function sizeOf(ref) {
   const h = resolveRef(ref);
   if (!h) return null;
-  const k = sheet.scaleOf(h.pack.id);
+  const k = strips.scaleOf(h.pack.id);
   return { w: h.entry.w * k, h: h.entry.h * k, smooth: k < 0.999 };
 }
 const renderer = createRenderer({ stage: world, layer, boardWrap, boardEl, boardLayer, resolveRef, sizeOf });
 const usedRefs = () => new Set(project(state).items.map(i => i.ref));
-// 同步重画（图片地址已经备好时用）。先画纸：纸算出各包的缩放，贴纸按它定尺寸
+// 同步重画（图片地址已经备好时用）。先画条：条算出各包的比例，贴纸按它定尺寸
 function paint() {
-  sheet.render(project(state), enabledPacks, usedRefs());
+  strips.render(enabledPacks, usedRefs());
   renderer.render(state, view(), sel);
-}
-// 纸整张留在桌面内（换了更大的纸、或者旧存档的位置靠边时）
-function clampSheet() {
-  const s = sheet.size();
-  if (!s) return;
-  const t = project(state).sheetT;
-  const x = Math.min(Math.max(t.x, s.w / 2), STAGE_W - s.w / 2);
-  const y = Math.min(Math.max(t.y, s.h / 2), STAGE_H - s.h / 2);
-  if (x !== t.x || y !== t.y) apply(state, { type: 'sheetMove', x, y });
 }
 async function render() {
   await ensureUrls();
@@ -211,7 +202,7 @@ function unrotate(dx, dy, rot) {
 }
 
 // ---------- 命中检测 ----------
-// 指针事件统一在这里判断点到了谁，从上往下找：桌上的贴纸 → 贴纸页上的贴纸 → 贴纸页 → 本子上的贴纸 → 本子。
+// 画布上的指针事件统一在这里判断点到了谁，从上往下找：桌上的贴纸 → 本子上的贴纸 → 本子。贴纸条上的格子另走 stripsEl 的 pointerdown。
 // 贴纸只认图案本身（透明的角落点不到）；离轮廓边缘近的地方才撕得起来（edge）。
 // 全部在屏幕像素里算：k = 每世界单位多少屏幕像素（画布上 = 相机缩放）。轮廓按显示尺寸建、键里带宽度，
 // 所以边缘热区在任何缩放下手感一致，撕纸层也直接吃这些屏幕量
@@ -230,11 +221,6 @@ function hitTest(e) {
     const hit = hitSticker(pt, toScreen(it), it.rot, it.ref, renderer.node(it.uid), cam.z);
     if (hit) return { kind: 'item', uid: it.uid, ...hit };
   }
-  for (const s of sheet.freeSlots()) {
-    const hit = hitSticker(pt, toScreen(s.c), s.rot, s.ref, s.img, cam.z);
-    if (hit) return { kind: 'slot', ...hit };
-  }
-  if (sheet.contains(toStage(e))) return { kind: 'sheet' };
   if (boardWrap.hidden) return null;
   for (const it of p.items.filter(i => i.on === 'board').sort(byZ)) {
     const hit = hitSticker(pt, toScreen(localToStage(it, p.boardT)), it.rot, it.ref, renderer.node(it.uid), cam.z);
@@ -242,42 +228,52 @@ function hitTest(e) {
   }
   return inside(boardEl, e) ? { kind: 'board' } : null;
 }
-const cursorFor = hit => !hit ? '' : hit.kind === 'board' || hit.kind === 'sheet' ? 'move' : hit.edge ? 'grab' : 'default';
+const cursorFor = hit => !hit ? '' : hit.kind === 'board' ? 'move' : hit.edge ? 'grab' : 'default';
 
 // ---------- 撕、拿、贴 ----------
 // drag = { kind:'peel', src, handle, start }            正在从边缘揭起，还没离开
 // drag = { kind:'hold', uid, dx, dy, handle, unrolling } 整张拿在手上，跟着手走
-// drag = { kind:'board' | 'sheet', dx, dy }             挪本子 / 挪贴纸页
+// drag = { kind:'board', dx, dy, snapped }              挪本子
 // drag = { kind:'pan', ox, oy, moved }                  拖空白处平移画布；没动过就是"点了一下空白"
 let drag = null;
 let hintAt = 0;
 
+function hintEdge() {   // 按在贴纸中间：真贴纸抠不起来，提示一下
+  if (Date.now() - hintAt > 4000) { hintAt = Date.now(); showToast('从贴纸边缘撕起来'); }
+}
 viewport.addEventListener('pointerdown', e => {
   if (e.button !== 0 || e.target.closest('button')) return;
   e.preventDefault();
   const hit = hitTest(e), pt = toStage(e), p = project(state);
   if (!hit) { drag = { kind: 'pan', ox: e.clientX - cam.x, oy: e.clientY - cam.y, moved: false }; return; }
-  if (hit.kind === 'board' || hit.kind === 'sheet') {
-    const t = hit.kind === 'board' ? p.boardT : p.sheetT;
-    drag = { kind: hit.kind, dx: t.x - pt.x, dy: t.y - pt.y, snapped: false };   // 快照等真的动了再打：点一下不算改动，不清重做栈
-    select(hit.kind === 'board' ? { kind: 'board' } : null);
+  if (hit.kind === 'board') {
+    const t = p.boardT;
+    drag = { kind: 'board', dx: t.x - pt.x, dy: t.y - pt.y, snapped: false };   // 快照等真的动了再打：点一下不算改动，不清重做栈
+    select({ kind: 'board' });
     render();
     return;
   }
-  if (!hit.edge) {
-    // 按在贴纸中间：真贴纸抠不起来，提示一下
-    if (Date.now() - hintAt > 4000) { hintAt = Date.now(); showToast('从贴纸边缘撕起来'); }
-    render();
-    return;
-  }
+  if (!hit.edge) { hintEdge(); render(); return; }
   viewport.style.cursor = 'grabbing';
+  startPeel(hit, e);
+});
+// 贴纸条上的格子：同一套撕法，k 换成这个包的缩略比例。不抓指针（拖出去的那张图片在画布世界里）
+stripsEl.addEventListener('pointerdown', e => {
+  if (e.button !== 0) return;
+  const s = strips.slotAt(e.target);
+  if (!s) return;
+  e.preventDefault();
+  const r = s.el.getBoundingClientRect();
+  const hit = hitSticker({ x: e.clientX, y: e.clientY }, { x: r.left + r.width / 2, y: r.top + r.height / 2 }, 0, s.ref, s.img, strips.thumbKOf(s.packId));
+  if (!hit) return;
+  if (!hit.edge) return hintEdge();
   startPeel(hit, e);
 });
 
 // 快照不在这里打，等真的揭下来那一刻（pickUp 之前）再打：撕到一半放弃不算一次改动，也不该清掉重做栈。
 // 撕纸层按屏幕像素画（w/h/c/grab 都是屏幕量）；捏点另存一份世界局部坐标（除以 k）给 pickUp 定位用
 function startPeel(hit, e) {
-  const src = { uid: hit.uid ?? null, ref: hit.ref, rot: hit.rot, el: hit.el, grab: { x: hit.local.x / hit.k, y: hit.local.y / hit.k } };
+  const src = { uid: hit.uid ?? null, ref: hit.ref, rot: hit.rot, el: hit.el, k: hit.k, grab: { x: hit.local.x / hit.k, y: hit.local.y / hit.k } };
   const handle = peeler && hit.sil
     ? peeler.begin({ key: resolveRef(hit.ref).entry.sha256, img: hit.el, w: hit.w, h: hit.h, smooth: hit.smooth, c: hit.c, rot: hit.rot, grab: hit.local, sil: hit.sil })
     : null;
@@ -294,29 +290,37 @@ function pickUp(src, pt, handle) {
   let uid = src.uid;
   if (uid == null) {
     uid = apply(state, { type: 'place', ref: src.ref, x: c.x, y: c.y, rot: src.rot, on: 'desk' });
-    src.el.style.visibility = '';   // 贴纸页上那一格交给 used 样式：露出底纸上的空位
+    src.el.style.visibility = '';   // 条上那一格交给 used 样式：露出底纸上的空位
   } else {
     apply(state, { type: 'move', uid, x: c.x, y: c.y, on: 'desk' });
     apply(state, { type: 'front', uid });
   }
   paint();
   const el = renderer.node(uid);
+  // 从条上撕下来的那张：交接时从缩略尺寸"弹"到画布上的实际尺寸（独立的 scale 属性，不碰 placeStyle 的 transform）
+  const pop = () => {
+    if (!el || Math.abs(src.k / cam.z - 1) < 0.02) return;
+    el.style.setProperty('--pop-from', src.k / cam.z);
+    el.classList.add('pop');
+    el.addEventListener('animationend', () => el.classList.remove('pop'), { once: true });
+  };
   drag = { kind: 'hold', uid, dx: -off.x, dy: -off.y, handle, unrolling: !!handle };
-  if (!handle) { el?.classList.add('dragging'); return; }
+  if (!handle) { el?.classList.add('dragging'); pop(); return; }
   // 卷边在 WebGL 里展平、抬起来并滑到指尖下，播完再换成普通图片接着跟手
   if (el) el.style.visibility = 'hidden';
   const sc = toScreen(c);
   handle.detach(sc.x, sc.y).then(() => {
     if (el) el.style.visibility = '';
+    pop();
     if (drag?.kind === 'hold' && drag.uid === uid) { drag.unrolling = false; el?.classList.add('dragging'); }
   });
 }
 
-// 松手：落在贴纸页上就放回去；落在本子上就贴在本子上（转局部坐标）；否则贴在桌面
+// 松手：落在贴纸条上就放回去；落在本子上就贴在本子上（转局部坐标）；否则贴在桌面
 function settle(d, e) {
   const p = project(state), el = renderer.node(d.uid);
   el?.classList.remove('dragging');
-  if (sheet.contains(toStage(e))) {
+  if (inside(stripsEl, e)) {
     apply(state, { type: 'remove', uids: [d.uid] });
     return;
   }
@@ -354,8 +358,7 @@ addEventListener('pointermove', e => {
     if (drag.unrolling) { const s = toScreen({ x, y }); drag.handle.moveTo(s.x, s.y); }
   } else {
     if (!drag.snapped) { snapshot(); drag.snapped = true; }
-    apply(state, { type: drag.kind === 'board' ? 'boardMove' : 'sheetMove', x: pt.x + drag.dx, y: pt.y + drag.dy });
-    if (drag.kind === 'sheet') clampSheet();
+    apply(state, { type: 'boardMove', x: pt.x + drag.dx, y: pt.y + drag.dy });
     paint();
   }
 });
@@ -397,18 +400,6 @@ viewport.addEventListener('wheel', e => {
   render();
 }, { passive: false });
 
-// 换一张纸（装了多个包时，每个包一张）
-function turnPage(dir) {
-  const p = project(state), n = sheet.count();
-  const page = Math.max(0, Math.min(n - 1, p.sheetT.page + dir));
-  if (page === p.sheetT.page) return;
-  apply(state, { type: 'sheetPage', page });
-  save();
-  render();
-}
-$('#sheet-prev').onclick = () => turnPage(-1);
-$('#sheet-next').onclick = () => turnPage(1);
-
 addEventListener('keydown', e => {
   if (e.target.tagName === 'INPUT') return;
   const k = e.key.toLowerCase(), mod = e.ctrlKey || e.metaKey;
@@ -416,9 +407,6 @@ addEventListener('keydown', e => {
   if (mod && k === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); return; }
   if (mod && k === 'y') { e.preventDefault(); redo(); return; }
   if (e.key === 'Escape') { if (!modal.hidden) modal.hidden = true; else { select(null); render(); } return; }
-  if (!modal.hidden) return;
-  if (e.key === 'ArrowLeft') return turnPage(-1);
-  if (e.key === 'ArrowRight') return turnPage(1);
 });
 addEventListener('keyup', e => { if (e.key.toLowerCase() === 'r') rHeld = false; });
 addEventListener('blur', () => { rHeld = false; });   // 按着 R 切走窗口，回来时别还当它按着
@@ -486,7 +474,7 @@ $('#btn-side-toggle').onclick = () => {
 $('#btn-clear').onclick = () => {
   if (!project(state).items.length) return;
   commit({ type: 'clear' }); select(null); render();
-  showToast('全部放回贴纸页啦（Ctrl+Z 可反悔）');
+  showToast('全部放回贴纸条啦（Ctrl+Z 可反悔）');
 };
 
 // ---------- 设置页 ----------
@@ -537,8 +525,6 @@ async function refresh() {
   fillDefaults();
   await syncSkin();
   await render();
-  clampSheet();
-  paint();
   save();
   if (!modal.hidden) { renderPackList(); renderSkinList(); }
 }
