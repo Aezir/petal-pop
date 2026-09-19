@@ -533,6 +533,7 @@ addEventListener('keydown', e => {
   if (k === 'r' && !mod) rHeld = true;
   if (mod && k === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); return; }
   if (mod && k === 'y') { e.preventDefault(); redo(); return; }
+  if (mod && k === 's') { e.preventDefault(); saveAll(); return; }
   if (e.key === 'Escape') { if (!modal.hidden) modal.hidden = true; else { select(null); render(); } return; }
 });
 addEventListener('keyup', e => { if (e.key.toLowerCase() === 'r') rHeld = false; });
@@ -558,41 +559,13 @@ function showToast(msg) {
   clearTimeout(showToast.t);
   showToast.t = setTimeout(() => toast.classList.remove('show'), 1800);
 }
-function cycle(type, current) {
-  const list = refsOfType(type);
-  if (!list.length) return null;
-  return list[(list.indexOf(current) + 1) % list.length];
-}
 $('#btn-bgm').onclick = () => { commit({ type: 'setBgm', on: !state.settings.bgm }); syncBgm(); };
-// 临时入口：再摆一本（下一步左栏的「本子」分类会接管）
-$('#btn-board').onclick = () => {
-  const list = refsOfType('board');
-  if (!list.length) return showToast('没有可用的底板');
-  const p = project(state);
-  const ref = list[p.boards.length % list.length];
-  commit({ type: 'addBoard', ref }); render();
-  showToast(`桌上 ${p.boards.length} 本`);
-};
-$('#btn-bg').onclick = () => {
-  const ref = cycle('background', view().background);
-  if (!ref) return showToast('没有可用的桌面');
-  commit({ type: 'setBackground', ref }); render();
-};
 async function setSkin(ref) {
   apply(state, { type: 'setSetting', patch: { skinRef: ref } });
   save();
-  const cfg = await syncSkin();
-  if (!modal.hidden) renderSkinList();
-  return cfg;
+  await syncSkin();
+  renderSide();
 }
-$('#btn-skin').onclick = async () => {
-  const list = [null, ...refsOfType('skin')];   // 默认主题排第一
-  if (list.length < 2) return showToast('还没有可用的皮肤（素材包里带 skin 条目才有）');
-  const cur = resolveRef(state.settings.skinRef) ? state.settings.skinRef : null;
-  const ref = list[(list.indexOf(cur) + 1) % list.length];
-  const cfg = await setSkin(ref);
-  showToast(`皮肤 ${list.indexOf(ref) + 1} / ${list.length}：${cfg ? cfg.name : '默认'}`);
-};
 $('#btn-undo').onclick = undo;
 $('#btn-redo').onclick = redo;
 // 本子回到 100%：锚点就是本子中心，只改 boardZ 就地缩回去，本子不会跑位
@@ -626,11 +599,10 @@ const tabs = modal.querySelectorAll('.tab');
 function showTab(name) {
   tabs.forEach(t => t.classList.toggle('on', t.dataset.tab === name));
   modal.querySelectorAll('[data-pane]').forEach(s => { s.hidden = s.dataset.pane !== name; });
-  if (name === 'skins') renderSkinList();
   if (name === 'storage') renderStorage();
 }
 tabs.forEach(t => { t.onclick = () => showTab(t.dataset.tab); });
-$('#btn-settings').onclick = () => { modal.hidden = false; showTab('skins'); };
+$('#btn-settings').onclick = () => { modal.hidden = false; showTab('save'); };
 $('#btn-close').onclick = () => { modal.hidden = true; };
 modal.addEventListener('click', e => { if (e.target === modal) modal.hidden = true; });
 
@@ -669,14 +641,356 @@ async function refresh() {
   await syncSkin();
   await render();
   save();
-  renderPackList();
-  if (!modal.hidden) renderSkinList();
+  renderSide();
 }
 
 const fmtMB = b => (b / 1048576).toFixed(1) + ' MB';
-// 左栏图包列表：分类 chip 过滤，置顶在前；每行 启用 / 名称 / 元信息 / 上移 下移 置顶 收藏 更新 卸载
-let packCat = 'all';
-$('#pack-chips').onclick = e => { const c = e.target.closest('.chip'); if (!c) return; packCat = c.dataset.cat; renderPackList(); };
+
+// ---------- 小卡片：问一句 / 要个名字 ----------
+// 不用原生 confirm / prompt：它们长得跟皮肤不搭，而且 confirm 只有两个按钮
+const askEl = $('#ask');
+function ask({ title, text = '', input = null, buttons }) {
+  return new Promise(resolve => {
+    askEl.querySelector('.ask-title').textContent = title;
+    askEl.querySelector('.ask-text').textContent = text;
+    const box = askEl.querySelector('.ask-input');
+    box.hidden = input == null;
+    box.value = input || '';
+    const row = askEl.querySelector('.ask-btns');
+    row.innerHTML = '';
+    const done = v => { askEl.hidden = true; askEl.onclick = null; resolve(v === undefined ? null : v); };
+    for (const b of buttons) {
+      const el = document.createElement('button');
+      el.className = 'btn' + (b.primary ? ' primary' : '') + (b.danger ? ' danger' : '');
+      el.textContent = b.label;
+      el.onclick = () => done(b.value === '@input' ? box.value.trim() : b.value);
+      row.appendChild(el);
+    }
+    askEl.onclick = e => { if (e.target === askEl) done(null); };
+    askEl.hidden = false;
+    if (input != null) { box.focus(); box.select(); }
+  });
+}
+
+// ---------- 作品 ----------
+// 一个作品 = 一张纸/一页本子 + 贴在它上面的贴纸。桌上收起一本时贴纸只在作品里活下来
+const fmtTime = t => { const d = new Date(t); const z = n => String(n).padStart(2, '0'); return `${z(d.getMonth() + 1)}-${z(d.getDate())} ${z(d.getHours())}:${z(d.getMinutes())}`; };
+const entryName = ref => { const h = resolveRef(ref); return h ? (h.entry.name || h.entry.id) : ref; };
+const bookOf = ref => resolveRef(ref)?.entry.book || null;
+const stickersOn = (p, id) => p.items.filter(i => i.on === 'board' && i.board === id).length;
+
+// 保存：桌上每一本都存成作品（没绑过的新建并绑定，绑过的更新）
+function saveAll({ asNew = false, baseName = '' } = {}) {
+  const p = project(state);
+  if (!p.boards.length) return showToast('桌上还没有本子');
+  snapshot();
+  const n = p.boards.length;
+  p.boards.forEach((b, i) => {
+    const bound = !asNew && b.work && state.works[b.work];
+    apply(state, {
+      type: 'saveWork', boardId: b.id,
+      workId: bound ? b.work : null,
+      name: bound ? undefined : (asNew ? (n > 1 ? `${baseName}-${i + 1}` : baseName) : `${entryName(b.ref)} ${fmtTime(Date.now())}`),
+    });
+  });
+  save();
+  renderSide();
+  showToast(`已保存 ${n} 个作品`);
+}
+$('#btn-save').onclick = () => saveAll();
+$('#btn-saveas').onclick = async () => {
+  if (!project(state).boards.length) return showToast('桌上还没有本子');
+  const name = await ask({
+    title: '另存为', text: '桌上每一本各存一份新作品，原来的作品不动。',
+    input: fmtTime(Date.now()),
+    buttons: [{ label: '取消', value: null }, { label: '保存', value: '@input', primary: true }],
+  });
+  if (name) saveAll({ asNew: true, baseName: name });
+};
+
+// 取消勾选桌上的一本：上面有贴纸就先问一句，别让玩家一不小心把半天的活丢了
+async function closeBoard(b) {
+  const p = project(state), n = stickersOn(p, b.id);
+  const bound = b.work && state.works[b.work];
+  if (n) {
+    const v = await ask({
+      title: '收起这本？',
+      text: `这本上有 ${n} 张贴纸。${bound ? `要先更新到作品「${state.works[b.work].name}」吗？` : '收起之后贴纸就没了，要先存成作品吗？'}`,
+      buttons: [
+        { label: '取消', value: 'cancel' },
+        { label: bound ? '不更新' : '不保存', value: 'drop', danger: true },
+        { label: bound ? '更新作品' : '存进作品', value: 'save', primary: true },
+      ],
+    });
+    if (v !== 'drop' && v !== 'save') { renderSide(); return; }   // 取消：勾选框回到勾上
+    snapshot();
+    if (v === 'save') apply(state, { type: 'saveWork', boardId: b.id, workId: bound ? b.work : null, name: bound ? undefined : `${entryName(b.ref)} ${fmtTime(Date.now())}` });
+  } else snapshot();
+  apply(state, { type: 'removeBoard', id: b.id });
+  save(); select(null); render(); renderSide();
+}
+
+// ---------- 左栏：分类 + 内容浏览器 ----------
+// 「全部 / 贴纸」列的是包（启用、排序、卸载都在那儿）；其余几类列的是条目，勾一下就摆到桌上
+const PACK_CATS = ['all', 'sticker'];
+const SUBS = { board: [['sheet', '纸张'], ['book', '本子']], bgm: [['track', '单曲'], ['cloud', '网易云']] };
+const SIDE_TITLE = { all: '素材包', sticker: '素材包', board: '本子', background: '桌面', bgm: '音乐', deco: '美化', work: '作品' };
+let sideCat = 'all';
+const subTab = { board: 'sheet', bgm: 'track' };
+const browseEl = $('#browse');
+attachScrollbar(browseEl);
+
+const groupOpen = key => state.ui.groups?.[key] !== false;
+function toggleGroup(key) {
+  const groups = { ...(state.ui.groups || {}) };
+  groups[key] = !groupOpen(key);
+  apply(state, { type: 'setUi', patch: { groups } });
+  save(); renderSide();
+}
+
+// 统一的一行：预览图 + 名字 + 小字 + 右边的勾选/单选和行内操作。thumb 传 sha256，没有就给个图标名
+function itemRow({ thumb, icon, name, sub, checked, kind = 'checkbox', disabled, onToggle, acts = [], chevKey }) {
+  const row = document.createElement('div');
+  row.className = 'item-row' + (disabled ? ' off' : '') + (chevKey ? ' item-group' + (groupOpen(chevKey) ? '' : ' closed') : '');
+  if (chevKey) { const c = document.createElement('i'); c.className = 'item-chev ri-arrow-down-s-line'; row.appendChild(c); }
+  const th = document.createElement('div');
+  th.className = 'item-thumb';
+  if (thumb) {
+    const img = document.createElement('img');
+    img.alt = '';
+    // 缩略图多半还没进缓存（ensureUrls 只备桌上用得到的），取不到就异步补一次
+    const u = Packs.urlSync(thumb);
+    if (u) img.src = u; else Packs.urlFor(thumb).then(v => { if (v) img.src = v; }).catch(() => {});
+    th.appendChild(img);
+  }
+  else if (icon) { const i = document.createElement('i'); i.className = icon; th.appendChild(i); }
+  row.appendChild(th);
+  const main = document.createElement('div');
+  main.className = 'item-main';
+  main.innerHTML = '<div class="item-name"></div><div class="item-sub dim"></div>';
+  main.querySelector('.item-name').textContent = name;
+  main.querySelector('.item-sub').textContent = sub || '';
+  row.appendChild(main);
+  if (acts.length) {
+    const box = document.createElement('div');
+    box.className = 'item-acts';
+    for (const a of acts) {
+      const b = document.createElement('button');
+      b.className = 'btn icon' + (a.danger ? ' danger' : '');
+      b.title = a.title;
+      b.innerHTML = `<i class="${a.icon}"></i>`;
+      b.onclick = ev => { ev.stopPropagation(); a.run(); };
+      box.appendChild(b);
+    }
+    row.appendChild(box);
+  }
+  if (onToggle) {
+    const box = document.createElement('input');
+    box.type = kind;
+    box.checked = !!checked;
+    box.disabled = !!disabled;
+    box.title = disabled ? '素材包未启用' : '';
+    box.onclick = ev => ev.stopPropagation();
+    box.onchange = () => onToggle(box.checked);
+    row.appendChild(box);
+    if (!disabled && !chevKey) row.onclick = () => { box.checked = !box.checked; box.onchange(); };
+  }
+  if (chevKey) row.onclick = () => toggleGroup(chevKey);
+  return row;
+}
+const emptyNote = text => { const d = document.createElement('div'); d.className = 'dim item-empty'; d.textContent = text; return d; };
+const deskBoardsOf = ref => project(state).boards.filter(b => b.ref === ref);
+
+// 本子：二级 tab 纸张 / 本子。勾一页 = 桌上开一张空白页（不带作品）
+function renderBoardsTab(box) {
+  const entries = enabledPacks.flatMap(pk => pk.entries.filter(e => e.type === 'board' && !e.deprecated).map(e => ({ pk, e })));
+  const toggle = (ref, on) => {
+    if (on) { snapshot(); apply(state, { type: 'addBoard', ref }); save(); render(); renderSide(); }
+    else { const list = deskBoardsOf(ref); if (list.length) closeBoard(list[list.length - 1]); }
+  };
+  const one = ({ pk, e }, kid) => {
+    const ref = pk.id + ':' + e.id, n = deskBoardsOf(ref).length;
+    return itemRow({
+      thumb: e.sha256, name: e.name || e.id,
+      sub: kid ? (n ? `桌上 ${n} 本` : '') : `${Packs.displayName(pk.name)}${n ? ` · 桌上 ${n} 本` : ''}`,
+      checked: n > 0, onToggle: on => toggle(ref, on),
+    });
+  };
+  if (subTab.board === 'sheet') {
+    const sheets = entries.filter(x => !x.e.book);
+    if (!sheets.length) return box.appendChild(emptyNote('启用的素材包里没有单张的纸'));
+    for (const x of sheets) box.appendChild(one(x));
+    return;
+  }
+  const books = new Map();
+  for (const x of entries) if (x.e.book) {
+    const key = x.pk.id + '::' + x.e.book;
+    if (!books.has(key)) books.set(key, { key, name: x.e.book, pk: x.pk, pages: [] });
+    books.get(key).pages.push(x);
+  }
+  if (!books.size) return box.appendChild(emptyNote('启用的素材包里没有成本的本子（清单里给 board 条目写 book 就能归成一本）'));
+  for (const b of books.values()) {
+    const onDesk = b.pages.reduce((n, x) => n + deskBoardsOf(x.pk.id + ':' + x.e.id).length, 0);
+    box.appendChild(itemRow({
+      thumb: b.pages[0].e.sha256, name: b.name,
+      sub: `${b.pages.length} 页${onDesk ? ` · 桌上 ${onDesk}` : ''} · ${Packs.displayName(b.pk.name)}`,
+      chevKey: 'book:' + b.key,
+    }));
+    const kids = document.createElement('div');
+    kids.className = 'item-kids';
+    for (const x of b.pages) kids.appendChild(one(x, true));
+    box.appendChild(kids);
+  }
+}
+
+// 作品：按更新时间倒序；同一本子（同 book）的几个作品折成一行
+function renderWorksTab(box) {
+  const works = Object.values(state.works).sort((a, b) => b.updatedAt - a.updatedAt);
+  if (!works.length) return box.appendChild(emptyNote('还没有作品。在桌上摆一本、贴几张，点顶栏的「保存」就有了'));
+  const row = w => {
+    const h = resolveRef(w.ref), missing = !h;
+    const boards = project(state).boards.filter(b => b.work === w.id);
+    return itemRow({
+      thumb: h?.entry.sha256, icon: missing ? 'ri-image-off-line' : null,
+      name: w.name, sub: missing ? '素材包未启用' : `${w.items.length} 张贴纸 · ${fmtTime(w.updatedAt)}`,
+      checked: boards.length > 0, disabled: missing,
+      onToggle: on => {
+        if (on) { snapshot(); apply(state, { type: 'openWork', id: w.id }); save(); render(); renderSide(); }
+        else if (boards.length) closeBoard(boards[boards.length - 1]);
+      },
+      acts: [
+        { icon: 'ri-edit-line', title: '改名', run: async () => {
+          const name = await ask({ title: '给作品改名', input: w.name, buttons: [{ label: '取消', value: null }, { label: '改名', value: '@input', primary: true }] });
+          if (name) { apply(state, { type: 'renameWork', id: w.id, name }); save(); renderSide(); }
+        } },
+        { icon: 'ri-delete-bin-line', title: '删除作品', danger: true, run: async () => {
+          const v = await ask({ title: `删除作品「${w.name}」？`, text: '桌上的东西不会跟着删；这一份存下来的没了就找不回来。', buttons: [{ label: '取消', value: null }, { label: '删除', value: 'y', danger: true }] });
+          if (v === 'y') { apply(state, { type: 'deleteWork', id: w.id }); save(); renderSide(); }
+        } },
+      ],
+    });
+  };
+  const groups = new Map(), loose = [];
+  for (const w of works) {
+    const bk = bookOf(w.ref);
+    if (!bk) { loose.push(w); continue; }
+    if (!groups.has(bk)) groups.set(bk, []);
+    groups.get(bk).push(w);
+  }
+  for (const [name, list] of groups) {
+    if (list.length === 1) { box.appendChild(row(list[0])); continue; }
+    box.appendChild(itemRow({ thumb: resolveRef(list[0].ref)?.entry.sha256, name, sub: `${list.length} 个作品`, chevKey: 'work:' + name }));
+    const kids = document.createElement('div');
+    kids.className = 'item-kids';
+    for (const w of list) kids.appendChild(row(w));
+    box.appendChild(kids);
+  }
+  for (const w of loose) box.appendChild(row(w));
+}
+
+function renderBackgroundTab(box) {
+  const cur = view().background;
+  const list = enabledPacks.flatMap(pk => pk.entries.filter(e => e.type === 'background' && !e.deprecated).map(e => ({ pk, e })));
+  if (!list.length) return box.appendChild(emptyNote('启用的素材包里没有桌面'));
+  for (const { pk, e } of list) {
+    const ref = pk.id + ':' + e.id;
+    box.appendChild(itemRow({
+      thumb: e.sha256, name: e.name || e.id, sub: Packs.displayName(pk.name),
+      checked: ref === cur, kind: 'radio',
+      onToggle: () => { commit({ type: 'setBackground', ref }); render(); renderSide(); },
+    }));
+  }
+}
+
+function renderBgmTab(box) {
+  if (subTab.bgm === 'cloud') return box.appendChild(emptyNote('网易云歌单：以后接入，现在还没做'));
+  const cur = view().bgm;
+  const list = enabledPacks.flatMap(pk => pk.entries.filter(e => e.type === 'bgm' && !e.deprecated).map(e => ({ pk, e })));
+  if (!list.length) return box.appendChild(emptyNote('启用的素材包里没有音乐'));
+  for (const { pk, e } of list) {
+    const ref = pk.id + ':' + e.id;
+    box.appendChild(itemRow({
+      icon: 'ri-music-2-line', name: e.name || e.id, sub: Packs.displayName(pk.name),
+      checked: ref === cur, kind: 'radio',
+      onToggle: () => { apply(state, { type: 'setBgm', ref, on: true }); save(); syncBgm(); renderSide(); },
+    }));
+  }
+}
+
+// 美化：默认主题 + 启用包里的每个 skin 条目。读配置是异步的，用序号防止两次渲染交错
+let skinSeq = 0;
+async function renderSkinTab(box) {
+  const my = ++skinSeq;
+  const cur = resolveRef(state.settings.skinRef) ? state.settings.skinRef : null;
+  const items = [{ ref: null, name: '默认主题', sub: '游戏自带' }];
+  for (const ref of refsOfType('skin')) {
+    const h = resolveRef(ref);
+    try {
+      const cfg = await readSkin(h);
+      items.push({ ref, name: cfg.name, preview: cfg.preview, sub: Packs.displayName(h.pack.name) + (cfg.warn.length ? ` · ${cfg.warn.length} 处配置被忽略` : '') });
+    } catch (e) {
+      items.push({ ref, name: h.entry.id, sub: '读取失败：' + e.message });
+    }
+  }
+  if (my !== skinSeq || sideCat !== 'deco') return;
+  box.innerHTML = '';
+  for (const it of items) {
+    if (it.preview) await Packs.urlFor(it.preview).catch(() => {});
+    box.appendChild(itemRow({
+      thumb: it.preview, icon: it.preview ? null : 'ri-palette-line',
+      name: it.name, sub: it.sub, checked: it.ref === cur, kind: 'radio',
+      onToggle: () => setSkin(it.ref),
+    }));
+  }
+}
+
+$('#sub-chips').onclick = e => {
+  const c = e.target.closest('.chip');
+  if (!c) return;
+  subTab[sideCat] = c.dataset.sub;
+  renderSide();
+};
+
+// 左栏总入口：按分类决定是列包还是列条目
+function renderSide() {
+  const isPack = PACK_CATS.includes(sideCat);
+  for (const el of [$('#pack-sort'), $('#pack-input').parentElement, packList, $('.side-foot')]) el.hidden = !isPack;
+  browseEl.hidden = isPack;
+  const subs = SUBS[sideCat], subBox = $('#sub-chips');
+  subBox.hidden = !subs;
+  if (subs) {
+    subBox.innerHTML = '';
+    for (const [k, label] of subs) {
+      const b = document.createElement('button');
+      b.className = 'chip' + (subTab[sideCat] === k ? ' on' : '');
+      b.dataset.sub = k;
+      b.textContent = label;
+      subBox.appendChild(b);
+    }
+  }
+  $('#side-title').textContent = SIDE_TITLE[sideCat] || '素材包';
+  const counts = { all: installed.length, sticker: 0, deco: 0, board: 0, background: 0, bgm: 0, work: Object.keys(state.works).length };
+  for (const p of installed) if (catOf(p) === 'sticker') counts.sticker++;
+  for (const pk of enabledPacks) for (const e of pk.entries) {
+    if (e.type === 'board') counts.board++;
+    else if (e.type === 'background') counts.background++;
+    else if (e.type === 'bgm') counts.bgm++;
+    else if (e.type === 'skin') counts.deco++;
+  }
+  for (const c of $('#pack-chips').querySelectorAll('.chip')) {
+    c.classList.toggle('on', c.dataset.cat === sideCat);
+    c.querySelector('i').textContent = counts[c.dataset.cat] || '';
+  }
+  if (isPack) return renderPackList();
+  browseEl.innerHTML = '';
+  if (sideCat === 'board') renderBoardsTab(browseEl);
+  else if (sideCat === 'background') renderBackgroundTab(browseEl);
+  else if (sideCat === 'bgm') renderBgmTab(browseEl);
+  else if (sideCat === 'work') renderWorksTab(browseEl);
+  else if (sideCat === 'deco') renderSkinTab(browseEl);
+}
+
+$('#pack-chips').onclick = e => { const c = e.target.closest('.chip'); if (!c) return; sideCat = c.dataset.cat; renderSide(); };
 // 排序：点当前项 = 反向，点别的项 = 切过去、方向回正
 $('#pack-sort').onclick = e => {
   const c = e.target.closest('.chip');
@@ -771,16 +1085,11 @@ addEventListener('pointerup', () => {
   apply(state, { type: 'packOrder', ids });
   refresh();
 }, true);
+// 左栏图包列表：置顶在前；每行 抓手 / 启用 / 名称 / 元信息 / 置顶 收藏 更新 卸载
 function renderPackList() {
   syncSortChips();
   const sorted = [...installed].sort(packCmp);
-  const counts = { all: sorted.length, sticker: 0, deco: 0 };
-  for (const p of sorted) counts[catOf(p)]++;
-  for (const c of $('#pack-chips').querySelectorAll('.chip')) {
-    c.classList.toggle('on', c.dataset.cat === packCat);
-    c.querySelector('i').textContent = counts[c.dataset.cat] || '';
-  }
-  const shown = sorted.filter(p => packCat === 'all' || catOf(p) === packCat);
+  const shown = sorted.filter(p => sideCat === 'all' || catOf(p) === sideCat);
   packList.innerHTML = '';
   if (!shown.length) { packList.innerHTML = `<div class="dim side-help">${installed.length ? '这个分类下没有包' : '还没有素材包'}</div>`; return; }
   for (const p of shown) {
@@ -819,7 +1128,7 @@ function renderPackList() {
     row.dataset.pack = p.id;
     row.querySelector('.pack-grip').addEventListener('pointerdown', ev => startPackDrag(ev, row, p.id, !!meta.pinned));
     row.querySelector('.act-pin').onclick = () => { apply(state, { type: 'setPack', id: p.id, patch: { pinned: !meta.pinned } }); refresh(); };
-    row.querySelector('.act-fav').onclick = () => { apply(state, { type: 'setPack', id: p.id, patch: { fav: !meta.fav } }); save(); renderPackList(); };
+    row.querySelector('.act-fav').onclick = () => { apply(state, { type: 'setPack', id: p.id, patch: { fav: !meta.fav } }); save(); renderSide(); };
     row.querySelector('.act-update').onclick = async ev => {
       ev.target.closest('button').disabled = true;
       try {
@@ -827,7 +1136,7 @@ function renderPackList() {
         if (!u.available) showToast('已经是最新：' + u.label);
         else await install(p.source);
       } catch (e) { showToast('检查失败：' + e.message); }
-      renderPackList();
+      renderSide();
     };
     row.querySelector('.act-remove').onclick = async () => {
       if (!confirm(`卸载「${Packs.displayName(p.name)}」？用了它的贴纸会显示为缺失，重新安装即可复原。`)) return;
@@ -837,37 +1146,6 @@ function renderPackList() {
       await refresh();
     };
     packList.appendChild(row);
-  }
-}
-// 皮肤列表：默认主题 + 启用包里的每个 skin 条目。读配置是异步的，用序号防止两次渲染交错
-const skinList = $('#skin-list');
-let skinListSeq = 0;
-async function renderSkinList() {
-  const my = ++skinListSeq;
-  const cur = resolveRef(state.settings.skinRef) ? state.settings.skinRef : null;
-  const items = [{ ref: null, name: '默认主题', swatch: ['#4a2e22', '#fff6e3', '#ff7fb0'], meta: '游戏自带' }];
-  for (const ref of refsOfType('skin')) {
-    const h = resolveRef(ref);
-    try {
-      const cfg = await readSkin(h);
-      items.push({ ref, name: cfg.name, swatch: cfg.swatch, preview: cfg.preview && await Packs.urlFor(cfg.preview), warn: cfg.warn.length, meta: Packs.displayName(h.pack.name) });
-    } catch (e) {
-      items.push({ ref, name: h.entry.id, swatch: ['#888', '#ccc', '#aaa'], meta: '读取失败：' + e.message });
-    }
-  }
-  if (my !== skinListSeq) return;
-  skinList.innerHTML = '';
-  for (const it of items) {
-    const card = document.createElement('div');
-    card.className = 'skin-card' + (it.ref === cur ? ' on' : '');
-    card.innerHTML = '<div class="skin-thumb"></div><div class="skin-main"><div class="skin-name"></div><div class="dim skin-meta"></div></div>';
-    const thumb = card.querySelector('.skin-thumb');
-    if (it.preview) { const img = document.createElement('img'); img.src = it.preview; img.alt = ''; thumb.appendChild(img); }
-    else for (const c of it.swatch) { const s = document.createElement('span'); s.style.background = c; thumb.appendChild(s); }   // swatch 里的值都过了白名单
-    card.querySelector('.skin-name').textContent = it.name;
-    card.querySelector('.skin-meta').textContent = it.meta + (it.warn ? ` · ${it.warn} 处配置被忽略（详情看控制台）` : '');
-    card.onclick = () => setSkin(it.ref);
-    skinList.appendChild(card);
   }
 }
 $('#btn-add').onclick = async () => {
@@ -929,10 +1207,6 @@ $('#btn-wipe').onclick = async () => {
   location.reload();
 };
 
-// 音量
-const vol = $('#volume');
-vol.value = Math.round(state.settings.volume * 100);
-vol.oninput = () => { apply(state, { type: 'setSetting', patch: { volume: vol.value / 100 } }); audio.volume = state.settings.volume; save(); };
 
 // ---------- 启动 ----------
 try { await navigator.storage?.persist?.(); } catch {}

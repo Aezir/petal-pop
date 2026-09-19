@@ -8,9 +8,9 @@ export const FORMAT_VERSION = 1;
 export const TYPES = { sticker: 'image', board: 'image', background: 'image', bgm: 'audio', skin: 'json', 'skin-asset': 'image' };
 export const LIMITS = { fileBytes: 32 * 1024 * 1024, entries: 2000, packBytes: 300 * 1024 * 1024, skinAssetEdge: 2048 };
 export const SKIN_VERSION = 1;   // 皮肤配置（skin.json）的格式版本
-// 安装器版本：安装记录里开始存新字段、或 TYPES 变了就加一（2：贴纸纸排版 sheet/scale；3：skin 类型 + 跳过的条目 skipped）。
+// 安装器版本：安装记录里开始存新字段、或 TYPES 变了就加一（2：贴纸纸排版 sheet/scale；3：skin 类型 + 跳过的条目 skipped；4：底板的 book）。
 // 旧安装器装的记录缺这些字段（或当年跳过了它不认识的条目），启动时自动重装一次；文件没变的不重下
-export const INSTALLER = 3;
+export const INSTALLER = 4;
 
 // 安装 / 卸载 / 回收互斥：同一标签页串成一条链，跨标签页再用 Web Locks。
 // 回收只认已提交的包，进行中的安装写了 blob 还没写 packs 记录，这时回收会把它删掉
@@ -124,6 +124,7 @@ export function validateManifest(json) {
     if (e.sha256) out.sha256 = e.sha256;
     if (Number.isFinite(e.w) && Number.isFinite(e.h)) { out.w = e.w; out.h = e.h; }
     for (const k of ['name', 'tags', 'anchor', 'deprecated']) if (e[k] != null) out[k] = e[k];
+    if (e.type === 'board' && typeof e.book === 'string' && e.book) out.book = e.book.slice(0, 60);   // 同包同 book 的几页归成一本本子
     if (Number.isFinite(e.sheet?.x) && Number.isFinite(e.sheet?.y)) out.sheet = { x: e.sheet.x, y: e.sheet.y };
     return out;
   }).filter(Boolean);

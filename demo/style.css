@@ -115,6 +115,40 @@ html,body{margin:0;height:100%;background:var(--bg);overflow:hidden;font:13.5px/
 .sort-row{align-items:center}
 .sort-label{font-size:11px;letter-spacing:.08em}
 
+/* ===== 左栏「内容浏览器」：本子 / 桌面 / 音乐 / 美化 / 作品 都用这一套行 =====
+   一行 = 预览图 + 名字（下面一行小字）+ 右边的勾选/单选和行内操作。
+   多页的（同一本子的几页、同一本子的几个作品）折成一个父行，点开才看到子行 */
+#browse{flex:1;overflow:auto;position:relative;display:flex;flex-direction:column;gap:4px;min-height:60px}
+.item-row{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:var(--radius-lg);background:var(--input);cursor:pointer}
+.item-row:hover{background:var(--panel2)}
+.item-row.off{opacity:.5;cursor:default}
+.item-thumb{
+  flex:none;width:56px;height:40px;border-radius:5px;overflow:hidden;
+  background:var(--panel2);display:flex;align-items:center;justify-content:center;color:var(--dim2);font-size:17px;
+}
+.item-thumb img{width:100%;height:100%;object-fit:contain;image-rendering:auto}
+.item-main{flex:1;min-width:0}
+.item-name{font-size:12.5px;color:var(--fg);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.item-sub{font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.item-row input{width:15px;height:15px;accent-color:var(--accent);margin:0;flex:none;cursor:pointer}
+.item-acts{display:flex;gap:2px;flex:none}
+.item-acts .btn{padding:2px 4px;font-size:11px}
+.item-acts .btn i{font-size:14px}
+.item-chev{flex:none;font-size:16px;color:var(--dim);transition:transform .15s}
+.item-group.closed .item-chev{transform:rotate(-90deg)}
+.item-kids{display:flex;flex-direction:column;gap:3px;margin:2px 0 2px 16px}
+.item-group.closed + .item-kids{display:none}
+.item-kids .item-thumb{width:40px;height:28px}
+.item-empty{padding:10px 4px;font-size:11.5px;line-height:1.5}
+
+/* 问一句的小卡片 */
+.ask-card{width:min(360px,86vw);padding:16px 18px;display:flex;flex-direction:column;gap:10px}
+.ask-title{font-size:15px;font-weight:600}
+.ask-text{font-size:12px;line-height:1.5}
+.ask-input{font:inherit;font-size:13px;padding:6px 10px;background:var(--input);border:1px solid var(--line);color:var(--fg);border-radius:7px;outline:none}
+.ask-input:focus{border-color:var(--accent)}
+.ask-btns{display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap}
+
 /* 包列表（左栏） */
 #pack-list{position:relative;flex:1;overflow:auto;display:flex;flex-direction:column;gap:6px;min-height:60px}
 .pack-row{display:flex;flex-direction:column;gap:4px;padding:8px 10px;border-radius:var(--radius-lg);background:var(--input);border-left:3px solid transparent}
@@ -171,7 +205,12 @@ html,body{margin:0;height:100%;background:var(--bg);overflow:hidden;font:13.5px/
    包表头做成整条宽的一行分隔，纸和贴纸左右都撑满栏宽 */
 #strips{padding:0;gap:0}
 .strip{flex:0 0 auto}
-.strip-head{display:flex;align-items:center;gap:6px;padding:7px 12px;cursor:pointer;font-size:12.5px;color:var(--fg);user-select:none;background:var(--panel2)}
+/* 表头吸在栏顶：往下滚的时候当前这一包的名字一直在，随时能点着折叠；滚过这一包就被下一包顶替 */
+.strip-head{
+  position:sticky;top:0;z-index:4;
+  display:flex;align-items:center;gap:6px;padding:7px 12px;cursor:pointer;font-size:12.5px;color:var(--fg);user-select:none;
+  background:var(--panel2);border-bottom:1px solid color-mix(in srgb,var(--fg) 10%,transparent);
+}
 .strip-head:hover{background:color-mix(in srgb,var(--fg) 6%,var(--panel2))}
 .strip-head .chev{font-size:16px;color:var(--dim);transition:transform .15s}
 .strip.collapsed .chev{transform:rotate(-90deg)}

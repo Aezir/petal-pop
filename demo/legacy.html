@@ -27,9 +27,9 @@
     <button id="btn-strips" class="btn" title="贴纸条面板"><i class="ri-price-tag-3-line"></i></button>
     <span class="bar-sep"></span>
     <button id="btn-bgm" class="btn" title="音乐开关"><i class="ri-music-2-line"></i></button>
-    <button id="btn-board" class="btn" title="换一块底板"><i class="ri-book-2-line"></i></button>
-    <button id="btn-bg" class="btn" title="换桌面"><i class="ri-landscape-line"></i></button>
-    <button id="btn-skin" class="btn" title="换一套界面皮肤"><i class="ri-palette-line"></i></button>
+    <span class="bar-sep"></span>
+    <button id="btn-save" class="btn" title="保存桌上的每一本为作品 (Ctrl+S)"><i class="ri-save-3-line"></i></button>
+    <button id="btn-saveas" class="btn" title="另存为新作品"><i class="ri-file-copy-line"></i></button>
     <span class="bar-sep"></span>
     <button id="btn-undo" class="btn" title="上一步 (Ctrl+Z)"><i class="ri-arrow-go-back-line"></i></button>
     <button id="btn-redo" class="btn" title="下一步 (Ctrl+Y)"><i class="ri-arrow-go-forward-line"></i></button>
@@ -41,16 +41,24 @@
 
   <aside id="side">
     <div class="side-head">
-      <span class="side-title">素材包</span>
+      <span class="side-title" id="side-title">素材包</span>
       <button id="btn-side-toggle" class="btn icon" title="收起这个面板"><i class="ri-close-line"></i></button>
     </div>
     <div id="side-body">
-      <!-- 分类：按包的内容推导——有贴纸的算「贴纸」，只有本子/桌面/音乐/皮肤的算「美化」 -->
+      <!-- 分类。全部 / 贴纸 列的是「包」（可启用、排序、卸载）；
+           其余几类列的是所有启用包里的「条目」，直接勾选就摆到桌上 -->
       <div id="pack-chips" class="chips">
         <button class="chip on" data-cat="all">全部<i></i></button>
         <button class="chip" data-cat="sticker" style="--tone:var(--t3)">贴纸<i></i></button>
-        <button class="chip" data-cat="deco" style="--tone:var(--t2)">美化<i></i></button>
+        <button class="chip" data-cat="board" style="--tone:var(--t1)">本子<i></i></button>
+        <button class="chip" data-cat="background" style="--tone:var(--t2)">桌面<i></i></button>
+        <button class="chip" data-cat="bgm" style="--tone:var(--t4)">音乐<i></i></button>
+        <button class="chip" data-cat="deco" style="--tone:var(--t5)">美化<i></i></button>
+        <button class="chip" data-cat="work" style="--tone:var(--t3)">作品<i></i></button>
       </div>
+      <!-- 二级 tab：本子 = 纸张/本子，音乐 = 单曲/网易云 -->
+      <div id="sub-chips" class="chips" hidden></div>
+      <div id="browse" hidden></div>
       <!-- 排序：点当前项 = 反向，点别的项 = 切过去并回到正向。自定义 = 拖出来的顺序 -->
       <div id="pack-sort" class="chips sort-row">
         <span class="dim sort-label">排序</span>
@@ -94,18 +102,11 @@
       <button id="btn-close" class="btn icon" title="关闭"><i class="ri-close-line"></i></button>
     </div>
     <div class="tabs">
-      <button class="tab on" data-tab="skins"><i class="ri-palette-line"></i>皮肤</button>
-      <button class="tab" data-tab="save"><i class="ri-save-3-line"></i>存档</button>
+      <button class="tab on" data-tab="save"><i class="ri-save-3-line"></i>存档</button>
       <button class="tab" data-tab="storage"><i class="ri-hard-drive-2-line"></i>存储</button>
-      <button class="tab" data-tab="audio"><i class="ri-music-2-line"></i>音乐</button>
     </div>
 
-    <section data-pane="skins">
-      <div id="skin-list"></div>
-      <div class="dim modal-help">皮肤来自素材包里的 skin 条目，只改颜色和纹理；不加载远程字体、不执行脚本。禁用或卸载皮肤所在的包会回到默认主题，装回来自动恢复。</div>
-    </section>
-
-    <section data-pane="save" hidden>
+    <section data-pane="save">
       <p>存档里只有贴纸的位置和引用，不含图片。换电脑时导出这份文件，装上同样的素材包再导入即可复原。</p>
       <div class="btn-row">
         <button id="btn-export" class="btn"><i class="ri-download-2-line"></i>导出存档</button>
@@ -122,10 +123,16 @@
       </div>
       <div class="dim modal-help">素材按内容去重存在浏览器的 IndexedDB 里。卸载素材包后点“清理”可释放空间。</div>
     </section>
+  </div>
+</div>
 
-    <section data-pane="audio" hidden>
-      <label class="slider-row">音量 <input id="volume" type="range" min="0" max="100"></label>
-    </section>
+<!-- 小卡片：要么问一句（存进作品 / 不保存 / 取消），要么要一个名字。不用原生 confirm / prompt -->
+<div id="ask" class="modal" hidden>
+  <div class="card ask-card">
+    <div class="ask-title"></div>
+    <div class="ask-text dim"></div>
+    <input class="ask-input" hidden spellcheck="false">
+    <div class="ask-btns"></div>
   </div>
 </div>
 
