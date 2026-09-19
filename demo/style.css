@@ -1,4 +1,5 @@
 /* ===== 像素风基础 ===== */
+/* 全部取色收口在这里；皮肤（skin.js）只改这些变量的值，不改规则。--skin-*-img 是纹理槽位，默认 none */
 :root{
   --ink:#4a2e22;        /* 深棕描边 */
   --paper:#fff6e3;      /* 纸色 */
@@ -6,9 +7,28 @@
   --pink-deep:#e2437f;
   --shadow:rgba(60,30,20,.35);
   --font:"DotGothic16","Zpix","Microsoft YaHei",sans-serif;
+  --page-bg:#2b1d16;            /* 页面底、加载遮罩 */
+  --stage-bg:#c98a4a;           /* 桌面没有背景图时的兜底色 */
+  --overlay:rgba(30,15,10,.55); /* 弹窗遮罩 */
+  --glow:#fff;                  /* 盒子/按钮内圈亮边 */
+  --on-accent:#fff;             /* 强调色上的文字 */
+  --btn-hover:#ffe9f2;
+  --btn-danger-hover:#ffd6d6;
+  --input-focus:#fff4f8;
+  --tab-on-bg:#fff;
+  --pack-row-bg:#fff;           /* 列表行、输入框底 */
+  --bar-track:#fff;
+  --bar-fill:var(--pink);
+  --bar-fill-deep:var(--pink-deep);
+  --sheet-grad-1:#ffdcea;       /* 贴纸纸渐变三色 */
+  --sheet-grad-2:#ffc6dd;
+  --sheet-grad-3:#f9b7d2;
+  --sheet-dot-color:rgba(255,255,255,.6);
+  --sheet-dot-sm-color:rgba(255,255,255,.35);
+  --sheet-dash-color:rgba(255,255,255,.85);
 }
 *{box-sizing:border-box}
-html,body{margin:0;height:100%;background:#2b1d16;overflow:hidden;font-family:var(--font);color:var(--ink);user-select:none;-webkit-user-select:none}
+html,body{margin:0;height:100%;background:var(--page-bg);overflow:hidden;font-family:var(--font);color:var(--ink);user-select:none;-webkit-user-select:none}
 img{image-rendering:pixelated;image-rendering:crisp-edges}
 [hidden]{display:none!important}
 
@@ -18,7 +38,7 @@ img{image-rendering:pixelated;image-rendering:crisp-edges}
   width:1672px;height:941px;
   transform:translate(-50%,-50%);
   transform-origin:center center;
-  background:#c98a4a center/cover no-repeat;
+  background:var(--stage-bg) center/cover no-repeat;
   overflow:hidden;
 }
 
@@ -47,26 +67,30 @@ img{image-rendering:pixelated;image-rendering:crisp-edges}
 }
 
 /* ===== 像素盒子 / 按钮 ===== */
+/* 纹理槽位写成单独的 background-image，放在 background 简写之后；状态样式只改 background-color，别把纹理冲掉 */
 .px-box{
   background:var(--paper);
+  background-image:var(--skin-box-img,none);
   border:4px solid var(--ink);
-  box-shadow:6px 6px 0 var(--shadow), inset 0 0 0 3px #fff;
+  box-shadow:6px 6px 0 var(--shadow), inset 0 0 0 3px var(--glow);
+  image-rendering:pixelated;
 }
 .px-btn{
   font-family:var(--font);font-size:16px;color:var(--ink);
   background:var(--paper);border:4px solid var(--ink);
-  box-shadow:4px 4px 0 var(--shadow), inset 0 0 0 2px #fff;
+  background-image:var(--skin-button-img,none);
+  box-shadow:4px 4px 0 var(--shadow), inset 0 0 0 2px var(--glow);
   padding:8px 12px;cursor:pointer;display:inline-flex;align-items:center;gap:6px;
-  line-height:1;white-space:nowrap;
+  line-height:1;white-space:nowrap;image-rendering:pixelated;
 }
 .px-btn i{font-size:20px}
 .px-btn.sm{font-size:14px;padding:5px 9px;border-width:3px}
 .px-btn.sm i{font-size:16px}
-.px-btn:hover{background:#ffe9f2}
-.px-btn:active{transform:translate(3px,3px);box-shadow:1px 1px 0 var(--shadow), inset 0 0 0 2px #fff}
-.px-btn.on{background:var(--pink);color:#fff}
+.px-btn:hover{background-color:var(--btn-hover)}
+.px-btn:active{transform:translate(3px,3px);box-shadow:1px 1px 0 var(--shadow), inset 0 0 0 2px var(--glow)}
+.px-btn.on{background-color:var(--pink);color:var(--on-accent)}
 .px-btn:disabled{opacity:.5;cursor:default}
-.px-btn.danger:hover{background:#ffd6d6}
+.px-btn.danger:hover{background-color:var(--btn-danger-hover)}
 
 #toolbar{position:absolute;left:24px;top:20px;display:flex;gap:12px;z-index:50}
 
@@ -76,18 +100,24 @@ img{image-rendering:pixelated;image-rendering:crisp-edges}
 /* ===== 贴纸纸（桌上的一张印刷贴纸纸） ===== */
 /* 位置 = 纸的中心，尺寸由 sheet.js 按包的排版算出来；和本子一样是桌上的物件，压在本子上面、桌面贴纸下面 */
 #sheetObj{position:absolute;z-index:2;filter:drop-shadow(6px 8px 0 var(--shadow));pointer-events:none}
+/* 三层：波点、小波点、底（渐变或皮肤纹理）。皮肤关波点就把 --skin-sheet-dot 设成 none，纹理只替换最底层 */
 .sheet-paper{
-  position:absolute;inset:0;border:4px solid var(--ink);border-radius:14px;overflow:hidden;
+  position:absolute;inset:0;border:4px solid var(--ink);border-radius:var(--skin-sheet-radius,14px);overflow:hidden;
   background:
-    radial-gradient(circle,rgba(255,255,255,.6) 0 3px,transparent 3.5px) 0 0/26px 26px,
-    radial-gradient(circle,rgba(255,255,255,.35) 0 2px,transparent 2.5px) 13px 13px/26px 26px,
-    linear-gradient(160deg,#ffdcea,#ffc6dd 60%,#f9b7d2);
+    var(--skin-sheet-dot,radial-gradient(circle,var(--sheet-dot-color) 0 3px,transparent 3.5px)) 0 0/26px 26px,
+    var(--skin-sheet-dot-sm,radial-gradient(circle,var(--sheet-dot-sm-color) 0 2px,transparent 2.5px)) 13px 13px/26px 26px,
+    var(--skin-sheet-bg,linear-gradient(160deg,var(--sheet-grad-1),var(--sheet-grad-2) 60%,var(--sheet-grad-3)));
+  image-rendering:pixelated;
 }
-.sheet-paper::before{content:'';position:absolute;inset:7px 7px 34px;border:2px dashed rgba(255,255,255,.85);border-radius:8px}
+.sheet-paper::before{
+  content:'';position:absolute;inset:7px 7px 34px;
+  border:2px var(--skin-sheet-dash,dashed) var(--sheet-dash-color);
+  border-radius:max(0px,calc(var(--skin-sheet-radius,14px) - 6px));
+}
 #sheetSlots{position:absolute;inset:0}
 /* 一格贴纸：外形按贴纸自己的透明度裁出来；贴纸撕走后，这格的底色就是底纸上亮面的刀模空位 */
 .slot{
-  position:absolute;
+  position:absolute;image-rendering:auto;   /* 别继承纸的 pixelated：遮罩缩小时要平滑，否则刀模边缘出锯齿 */
   -webkit-mask:var(--m) center/100% 100% no-repeat;mask:var(--m) center/100% 100% no-repeat;
   background:linear-gradient(135deg,rgba(255,255,255,.9),rgba(255,255,255,.4) 45%,rgba(255,255,255,.75));
 }
@@ -105,7 +135,7 @@ img{image-rendering:pixelated;image-rendering:crisp-edges}
   border:3px solid var(--ink);background:var(--paper);color:var(--ink);box-shadow:2px 2px 0 var(--shadow);
 }
 .sheet-btn i{font-size:20px}
-.sheet-btn:hover{background:#ffe9f2}
+.sheet-btn:hover{background-color:var(--btn-hover)}
 .sheet-btn:disabled{opacity:.35;cursor:default}
 
 /* 撕贴纸的 WebGL 层：盖满舞台，不接事件 */
@@ -116,12 +146,13 @@ img{image-rendering:pixelated;image-rendering:crisp-edges}
   position:absolute;left:50%;bottom:30px;transform:translateX(-50%);
   padding:10px 18px;font-size:18px;z-index:60;opacity:0;transition:opacity .2s;pointer-events:none;
   max-width:900px;
+  background-image:var(--skin-toast-img,var(--skin-box-img,none));
 }
 #toast.show{opacity:1}
 
 /* ===== 设置弹窗 ===== */
-.modal{position:fixed;inset:0;background:rgba(30,15,10,.55);display:flex;align-items:center;justify-content:center;z-index:90}
-.modal-card{width:min(720px,92vw);max-height:88vh;display:flex;flex-direction:column;padding:16px 18px;gap:12px}
+.modal{position:fixed;inset:0;background:var(--overlay);display:flex;align-items:center;justify-content:center;z-index:90}
+.modal-card{width:min(720px,92vw);max-height:88vh;display:flex;flex-direction:column;padding:16px 18px;gap:12px;background-image:var(--skin-modal-img,var(--skin-box-img,none))}
 .modal-head{display:flex;justify-content:space-between;align-items:center;font-size:24px;border-bottom:4px dotted var(--ink);padding-bottom:8px}
 .tabs{display:flex;gap:6px}
 .tab{
@@ -130,11 +161,11 @@ img{image-rendering:pixelated;image-rendering:crisp-edges}
 }
 .tab i{font-size:17px}
 .tab:hover{opacity:1}
-.tab.on{opacity:1;border-color:var(--ink);background:#fff;box-shadow:3px 3px 0 var(--shadow)}
+.tab.on{opacity:1;border-color:var(--ink);background-color:var(--tab-on-bg);box-shadow:3px 3px 0 var(--shadow)}
 .modal-card section{display:flex;flex-direction:column;gap:12px;overflow:auto;min-height:120px}
 .modal-card p{margin:0;line-height:1.6;font-size:15px}
 #pack-list{flex:1;overflow:auto;display:flex;flex-direction:column;gap:8px;min-height:60px}
-.pack-row{display:flex;align-items:center;gap:10px;padding:8px 10px;border:3px solid var(--ink);background:#fff}
+.pack-row{display:flex;align-items:center;gap:10px;padding:8px 10px;border:3px solid var(--ink);background:var(--pack-row-bg)}
 .pack-row.off{opacity:.55}
 .pack-main{flex:1;display:grid;grid-template-columns:auto 1fr;grid-template-rows:auto auto;column-gap:10px;align-items:center;cursor:pointer;min-width:0}
 .pack-main input{grid-row:1/3;width:20px;height:20px;accent-color:var(--pink-deep)}
@@ -144,9 +175,9 @@ img{image-rendering:pixelated;image-rendering:crisp-edges}
 .add-row{display:flex;gap:8px}
 .add-row input{
   flex:1;font-family:var(--font);font-size:15px;padding:8px 10px;
-  border:4px solid var(--ink);background:#fff;color:var(--ink);outline:none;
+  border:4px solid var(--ink);background:var(--pack-row-bg);color:var(--ink);outline:none;
 }
-.add-row input:focus{background:#fff4f8}
+.add-row input:focus{background-color:var(--input-focus)}
 .row-end{display:flex;justify-content:flex-end}
 .btn-row{display:flex;gap:10px;flex-wrap:wrap}
 .modal-help{font-size:12px;line-height:1.5}
@@ -155,10 +186,10 @@ img{image-rendering:pixelated;image-rendering:crisp-edges}
 .slider-row input{flex:1;accent-color:var(--pink-deep)}
 
 /* ===== 加载遮罩 ===== */
-#loading{position:fixed;inset:0;background:#2b1d16;display:flex;align-items:center;justify-content:center;z-index:100;transition:opacity .3s}
+#loading{position:fixed;inset:0;background:var(--page-bg);display:flex;align-items:center;justify-content:center;z-index:100;transition:opacity .3s}
 #loading.hide{opacity:0;pointer-events:none}
-.load-card{width:460px;padding:28px 30px;text-align:center}
+.load-card{width:460px;padding:28px 30px;text-align:center;background-image:var(--skin-loading-img,var(--skin-box-img,none))}
 .load-title{font-size:32px;color:var(--pink-deep);letter-spacing:4px;margin-bottom:8px}
 .load-sub{font-size:14px;opacity:.7;margin-bottom:18px;min-height:1.4em}
-.bar-wrap{height:22px;border:4px solid var(--ink);background:#fff;padding:2px}
-#bar{height:100%;width:0;background:repeating-linear-gradient(90deg,var(--pink) 0 8px,var(--pink-deep) 8px 12px);transition:width .1s}
+.bar-wrap{height:22px;border:4px solid var(--ink);background:var(--bar-track);padding:2px}
+#bar{height:100%;width:0;background:repeating-linear-gradient(90deg,var(--bar-fill) 0 8px,var(--bar-fill-deep) 8px 12px);transition:width .1s}
