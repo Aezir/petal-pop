@@ -42,6 +42,8 @@ export function createRenderer({ stage, layer, boardWrap, boardEl, boardLayer, r
       const wantMissing = !hit;
       if (el && el.classList.contains('missing') !== wantMissing) { el.remove(); el = null; }
       if (!el) { el = makeNode(it); nodes.set(it.uid, el); }
+      // 正拿在手上的那张挂在 #hand 里、按屏幕像素摆（app.js 管），这里别抢回来、也别改它的位置
+      if (el.classList.contains('in-hand')) { seen.add(it.uid); continue; }
       const parent = it.on === 'board' ? boardLayer : layer;
       if (el.parentNode !== parent) parent.appendChild(el);
       if (hit && el.tagName === 'IMG') {

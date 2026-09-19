@@ -134,9 +134,8 @@ html,body{margin:0;height:100%;background:var(--bg);overflow:hidden;font:13.5px/
   white-space:pre-line;font-size:12px;line-height:1.3;padding:6px;
   background:rgba(240,239,235,.9);border:2px dashed var(--fg);filter:none;
 }
-/* 从条上撕下来交接到画布那一刻：从缩略尺寸弹到实际尺寸 */
-.placed.pop{animation:pop .16s ease-out}
-@keyframes pop{from{scale:var(--pop-from,1)}to{scale:1}}
+/* 拿在手上的那张：自己一层，按屏幕像素画，压在两栏浮层之上、撕纸层之下 */
+#hand{position:fixed;inset:0;pointer-events:none;z-index:70}
 
 /* ===== 贴纸条（右栏，一包一条） ===== */
 #strips{padding:8px;gap:10px}

@@ -16,7 +16,7 @@ const DEFAULT_SOURCES = ['local:packs/default', 'Aezir/petal-pop-assets'];
 const $ = s => document.querySelector(s);
 
 const viewport = $('#viewport'), world = $('#world'), zoomReadout = $('#zoom-readout'), stripsEl = $('#strips'), sideEl = $('#side'),
-      topbar = $('#topbar'), layer = $('#layer'), boardWrap = $('#boardWrap'), boardEl = $('#board'),
+      topbar = $('#topbar'), handEl = $('#hand'), layer = $('#layer'), boardWrap = $('#boardWrap'), boardEl = $('#board'),
       boardLayer = $('#boardLayer'), toast = $('#toast'), audio = $('#bgm'), loading = $('#loading'), loadText = $('#load-text'),
       bar = $('#bar'), modal = $('#modal'), packList = $('#pack-list');
 
@@ -315,16 +315,59 @@ function startPeel(hit, e) {
   const handle = peeler && hit.sil
     ? peeler.begin({ key: resolveRef(hit.ref).entry.sha256, img: hit.el, w: hit.w, h: hit.h, smooth: hit.smooth, c: hit.c, rot: hit.rot, grab: hit.local, sil: hit.sil })
     : null;
-  if (!handle) { snapshot(); pickUp(src, toStage(e), null); return; }
+  if (!handle) { snapshot(); pickUp(src, e, null); return; }
   hit.el.style.visibility = 'hidden';
   drag = { kind: 'peel', src, handle, start: { x: e.clientX, y: e.clientY } };
 }
 
-// 整张离开：放进状态（桌面坐标、最上层），之后跟着手走。
-// 捏住的那一点（src.grab）始终在指尖下面，所以贴纸中心 = 指尖 − 捏点相对中心的偏移（带上贴纸的旋转）
-function pickUp(src, pt, handle) {
-  const off = unrotate(src.grab.x, src.grab.y, -src.rot);
-  const c = { x: pt.x - off.x, y: pt.y - off.y };
+// ---------- 拿在手上的那一张 ----------
+// 手上的贴纸不跟着桌面层也不跟着本子层，而是单独挂在 #hand 里按屏幕像素画。
+// 比例从脱离那一刻起**一直等于本子的比例**（fit × boardZ）——你是在给本子挑贴纸，手上看到的就该是它贴上去的大小。
+// 捏住的那一点始终钉在指尖下面：中心 = 指尖 − 捏点偏移 × 当前比例，所以换比例时鼠标底下那个点不漂。
+const POP_MS = 140;
+const handK = () => fit * project(state).boardZ;
+let hand = null;   // { el, uid, src, w, h, x, y, k, kFrom, kTo, t0, handle, raf }
+
+function paintHand(now) {
+  if (!hand) return false;
+  const t = Math.min(1, (now - hand.t0) / POP_MS), ease = 1 - (1 - t) * (1 - t);
+  hand.k = hand.kFrom + (hand.kTo - hand.kFrom) * ease;
+  const off = unrotate(hand.src.grab.x, hand.src.grab.y, -hand.src.rot);
+  const cx = hand.x - off.x * hand.k, cy = hand.y - off.y * hand.k;
+  // 元素躺在 #hand 的 (0,0)、按自己的原始世界尺寸布局；这一串 transform 把它绕中心转好、缩放、再搬到 (cx,cy)
+  hand.el.style.transform = `translate(${cx}px,${cy}px) scale(${hand.k}) rotate(${hand.src.rot}deg) translate(${-hand.w / 2}px,${-hand.h / 2}px)`;
+  const d = toStage({ clientX: cx, clientY: cy });   // 状态里仍记桌面坐标，松手时才决定归桌面还是归本子
+  apply(state, { type: 'move', uid: hand.uid, x: d.x, y: d.y });
+  if (drag?.unrolling) hand.handle.moveTo(cx, cy);
+  return t < 1;
+}
+function tick() {
+  if (!hand || hand.raf) return;
+  hand.raf = requestAnimationFrame(now => { if (!hand) return; hand.raf = 0; if (paintHand(now)) tick(); });
+}
+// 从缩略尺寸"弹"到本子比例：条上撕出来的那张起点是条上的缩略比例；画布上拿起来的本来就是这个比例，不弹
+function popTo(k) {
+  if (!hand) return;
+  hand.kFrom = hand.k; hand.kTo = k;
+  hand.t0 = Math.abs(k - hand.k) < 0.02 ? -1e9 : performance.now();
+  paintHand(performance.now());
+  tick();
+}
+function dropHand() {
+  if (!hand) return;
+  cancelAnimationFrame(hand.raf);
+  hand.el.classList.remove('in-hand', 'dragging');
+  hand.el.style.transformOrigin = '';
+  hand.el.style.height = '';       // 还给渲染器：宽度它自己写，高度按图片比例自适应
+  hand.el.style.visibility = '';
+  hand = null;
+}
+
+// 整张离开：放进状态（桌面坐标、最上层），然后交给"手"层跟着手走
+function pickUp(src, e, handle) {
+  const k0 = handK(), off = unrotate(src.grab.x, src.grab.y, -src.rot);
+  const sc = { x: e.clientX - off.x * k0, y: e.clientY - off.y * k0 };   // 贴纸中心此刻该在的屏幕位置
+  const c = toStage({ clientX: sc.x, clientY: sc.y });
   let uid = src.uid;
   if (uid == null) {
     uid = apply(state, { type: 'place', ref: src.ref, x: c.x, y: c.y, rot: src.rot, on: 'desk' });
@@ -334,36 +377,38 @@ function pickUp(src, pt, handle) {
     apply(state, { type: 'front', uid });
   }
   paint();
+  drag = { kind: 'hold', uid, handle, unrolling: !!handle };
   const el = renderer.node(uid);
-  // 从条上撕下来的那张：交接时从缩略尺寸"弹"到画布上的实际尺寸（独立的 scale 属性，不碰 placeStyle 的 transform）
-  // 刚撕下来的贴纸一律先落在桌面层，显示比例就是 fit；落到本子上要等松手那一刻才换算
-  const pop = () => {
-    if (!el || Math.abs(src.k / fit - 1) < 0.02) return;
-    el.style.setProperty('--pop-from', src.k / fit);
-    el.classList.add('pop');
-    el.addEventListener('animationend', () => el.classList.remove('pop'), { once: true });
-  };
-  drag = { kind: 'hold', uid, dx: -off.x, dy: -off.y, handle, unrolling: !!handle };
-  if (!handle) { el?.classList.add('dragging'); pop(); return; }
+  if (!el) return;
+  // 宽高写死成世界尺寸：图片刚建出来还没 load 完时 offsetHeight 是 0，量出来的中心会差半张贴纸
+  const size = sizeOf(src.ref);
+  const w = size ? size.w : (el.offsetWidth || 110), h = size ? size.h : (el.offsetHeight || 110);
+  el.classList.add('in-hand', 'dragging');
+  el.style.transformOrigin = '0 0';
+  el.style.left = '0px'; el.style.top = '0px';
+  el.style.width = w + 'px'; el.style.height = h + 'px';
+  handEl.appendChild(el);
+  hand = { el, uid, src, w, h, x: e.clientX, y: e.clientY, k: src.k, kFrom: src.k, kTo: src.k, t0: -1e9, handle, raf: 0 };
+  if (!handle) { popTo(k0); return; }
   // 卷边在 WebGL 里展平、抬起来并滑到指尖下，播完再换成普通图片接着跟手
-  if (el) el.style.visibility = 'hidden';
-  const sc = toScreen(c);
+  el.style.visibility = 'hidden';
+  paintHand(performance.now());
   handle.detach(sc.x, sc.y).then(() => {
-    if (el) el.style.visibility = '';
-    pop();
-    if (drag?.kind === 'hold' && drag.uid === uid) { drag.unrolling = false; el?.classList.add('dragging'); }
+    if (drag?.kind !== 'hold' || drag.uid !== uid) return;
+    drag.unrolling = false;
+    if (hand?.uid === uid) { hand.el.style.visibility = ''; popTo(handK()); }
   });
 }
 
-// 松手：落在贴纸条上就放回去；落在本子上就贴在本子上（转局部坐标）；否则贴在桌面
+// 松手：落在贴纸条上就放回去；落在本子上就贴在本子上（转局部坐标，大小不变）；
+// 否则贴在桌面——桌面是锁死的背景，贴纸按 fit 收回原大小，这是唯一允许的跳变
 function settle(d, e) {
-  const p = project(state), el = renderer.node(d.uid);
-  el?.classList.remove('dragging');
+  const p = project(state);
+  dropHand();
   if (inside(stripsEl, e)) {
     apply(state, { type: 'remove', uids: [d.uid] });
     return;
   }
-  // 拿在手上时贴纸一直用桌面坐标，落到本子上才换算（本子可能被放大缩小过，所以要连 boardZ 一起除）
   const onBoard = overBoard(e), it = findItem(p, d.uid);
   const pos = onBoard ? stageToBoard(it, p) : it;
   apply(state, { type: 'move', uid: d.uid, x: pos.x, y: pos.y, on: onBoard ? 'board' : 'desk' });   // 就贴在松手的地方，不做落下动画
@@ -384,13 +429,9 @@ addEventListener('pointermove', e => {
   if (drag.kind === 'peel') {
     const { src, handle, start } = drag;
     const d = unrotate(e.clientX - start.x, e.clientY - start.y, src.rot);   // 屏幕像素
-    if (handle.update(d.x, d.y) >= DETACH_AT) { snapshot(); pickUp(src, pt, handle); }
+    if (handle.update(d.x, d.y) >= DETACH_AT) { snapshot(); pickUp(src, e, handle); }
   } else if (drag.kind === 'hold') {
-    const x = pt.x + drag.dx, y = pt.y + drag.dy;
-    apply(state, { type: 'move', uid: drag.uid, x, y });
-    const el = renderer.node(drag.uid), it = findItem(project(state), drag.uid);
-    if (el && it) renderer.placeStyle(el, it);
-    if (drag.unrolling) { const s = toScreen({ x, y }); drag.handle.moveTo(s.x, s.y); }
+    if (hand) { hand.x = e.clientX; hand.y = e.clientY; paintHand(performance.now()); }
   } else {
     if (!drag.snapped) { snapshot(); drag.snapped = true; }
     apply(state, { type: 'boardMove', x: pt.x + drag.dx, y: pt.y + drag.dy });
@@ -398,7 +439,7 @@ addEventListener('pointermove', e => {
   }
 });
 addEventListener('pointerup', e => {
-  if (!drag) return;
+  if (!drag) { if (hand) { dropHand(); render(); } return; }   // 兜底：拖动状态丢了也别把贴纸落在"手"里
   const d = drag;
   drag = null;
   viewport.style.cursor = '';
@@ -412,7 +453,7 @@ addEventListener('pointerup', e => {
 });
 addEventListener('pointercancel', () => {
   if (drag?.kind === 'peel') springBack(drag);
-  else if (drag?.kind === 'hold') renderer.node(drag.uid)?.classList.remove('dragging');
+  else if (drag?.kind === 'hold') dropHand();
   drag = null;
   save();
   render();
@@ -424,7 +465,7 @@ let rHeld = false;
 viewport.addEventListener('wheel', e => {
   if (overUi(e)) return;
   e.preventDefault();
-  if (drag?.kind === 'peel') return;
+  if (drag) return;   // 正在撕 / 拿着贴纸：别让缩放插一脚
   const hit = rHeld ? hitTest(e) : null;
   if (hit?.kind !== 'item') {
     const dy = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaMode === 2 ? e.deltaY * innerHeight : e.deltaY;
